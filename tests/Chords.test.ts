@@ -70,22 +70,22 @@ describe('semitoneDistance', () => {
 describe('parseChord', () => {
   it('should parse simple chords', () => {
     const result = parseChord('C')
-    expect(result).toEqual({ rootPitch: 0, bassPitch: null, suffix: '' })
+    expect(result).toEqual({ rootPitch: 0, bassPitch: undefined, suffix: '' })
   })
 
   it('should parse chords with sharps', () => {
     const result = parseChord('C#')
-    expect(result).toEqual({ rootPitch: 1, bassPitch: null, suffix: '' })
+    expect(result).toEqual({ rootPitch: 1, bassPitch: undefined, suffix: '' })
   })
 
   it('should parse chords with flats', () => {
     const result = parseChord('Db')
-    expect(result).toEqual({ rootPitch: 1, bassPitch: null, suffix: '' })
+    expect(result).toEqual({ rootPitch: 1, bassPitch: undefined, suffix: '' })
   })
 
   it('should parse chords with suffixes', () => {
     const result = parseChord('Cmaj7')
-    expect(result).toEqual({ rootPitch: 0, bassPitch: null, suffix: 'maj7' })
+    expect(result).toEqual({ rootPitch: 0, bassPitch: undefined, suffix: 'maj7' })
   })
 
   it('should parse slash chords', () => {
@@ -93,9 +93,9 @@ describe('parseChord', () => {
     expect(result).toEqual({ rootPitch: 0, bassPitch: 7, suffix: '' })
   })
 
-  it('should return null for invalid chords', () => {
-    expect(parseChord('H')).toBeNull()
-    expect(parseChord('1')).toBeNull()
-    expect(parseChord('')).toBeNull()
+  it('should return undefined for invalid chords', () => {
+    expect(parseChord('H')).toBeUndefined()
+    expect(parseChord('1')).toBeUndefined()
+    expect(parseChord('')).toBeUndefined()
   })
 })
