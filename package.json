@@ -1,18 +1,17 @@
 {
   "name": "musicsheets",
   "version": "1.0.0",
+  "type": "module",
   "description": "Google Apps Script for music chord sheets with auto-transposition",
   "scripts": {
-    "build": "tsc && cp appsscript.json dist/appsscript.json",
+    "build": "tsc && node scripts/post-build.js && cp appsscript.json dist/appsscript.json",
+    "prepush": "npm run test:run && npm run lint",
     "push": "npm run build && clasp push",
     "watch": "tsc --watch",
     "deploy": "npm run build && clasp push && clasp deploy",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "vitest",
-    "test:ui": "vitest --ui",
-    "test:run": "vitest run",
-    "coverage": "vitest run --coverage"
+    "test": "vitest run"
   },
   "devDependencies": {
     "@eslint/compat": "^2.0.0",

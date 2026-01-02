@@ -9,7 +9,7 @@ import ts from 'typescript-eslint'
 const gitignorePath = fileURLToPath(new URL('./.gitignore', import.meta.url))
 const parserOptions = {
 	projectService: {
-		allowDefaultProject: ['*.js', 'vitest.config.ts']
+		allowDefaultProject: ['*.js', 'vitest.config.ts', 'tests/*.ts']
 	},
 	parser: ts.parser
 }
@@ -31,8 +31,6 @@ export default defineConfig(
 			}
 		},
 		rules: {
-			'no-undef': 'off',
-			'@typescript-eslint/no-unused-vars': 'off',
 			'no-console': ['warn', { allow: ['warn', 'error'] }],
 			'prefer-const': 'warn',
 			'no-var': 'error',
@@ -54,8 +52,15 @@ export default defineConfig(
 	},
 	{
 		files: ['**/*.ts', '**/*.tsx'],
+		ignores: ['tests/**/*.ts'],
 		languageOptions: {
 			parserOptions
+		}
+	},
+	{
+		files: ['tests/**/*.ts'],
+		languageOptions: {
+			parser: ts.parser
 		}
 	}
 )

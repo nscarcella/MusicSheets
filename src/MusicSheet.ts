@@ -1,3 +1,5 @@
+import { parseChord, semitoneDistance, transpose } from "./Chords"
+
 const LYRICS_SHEET_NAME = "Letra"
 const CHORDS_SHEET_NAME = "Acordes"
 const PRINT_SHEET_NAME = "Impresión"
@@ -22,7 +24,7 @@ const PADDING = 3
 // HOOKS
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-function onOpen(): void {
+export function onOpen(): void {
   try {
     updateDocumentTitle()
   } catch (error: unknown) {
@@ -30,7 +32,7 @@ function onOpen(): void {
   }
 }
 
-function onEdit(event: GoogleAppsScript.Events.SheetsOnEdit): void {
+export function onEdit(event: GoogleAppsScript.Events.SheetsOnEdit): void {
   try {
     const editedRange = event.range
     const sourceSheetName = editedRange.getSheet().getName()
@@ -51,7 +53,7 @@ function onEdit(event: GoogleAppsScript.Events.SheetsOnEdit): void {
   }
 }
 
-function onChange(event: GoogleAppsScript.Events.SheetsOnChange): void {
+export function onChange(event: GoogleAppsScript.Events.SheetsOnChange): void {
   try {
     const structuralChanges = ["INSERT_ROW", "INSERT_COLUMN", "REMOVE_ROW", "REMOVE_COLUMN", "OTHER"] as const
     if (structuralChanges.includes(event.changeType as typeof structuralChanges[number])) {
@@ -243,9 +245,9 @@ function validateAutoTranspose(editedRange: GoogleAppsScript.Spreadsheet.Range):
 // ACTIONS
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-function transposeUp(): void { transposeChords(1, true) }
+export function transposeUp(): void { transposeChords(1, true) }
 
-function transposeDown(): void { transposeChords(-1, true) }
+export function transposeDown(): void { transposeChords(-1, true) }
 
 function transposeChords(semitones: number, updateKey: boolean = true): void {
   if (updateKey) {
@@ -256,7 +258,7 @@ function transposeChords(semitones: number, updateKey: boolean = true): void {
         let transposedKey: string
         try {
           transposedKey = transpose(keyValue, semitones)
-        } catch (error) {
+        } catch {
           transposedKey = keyValue.toString().startsWith("!") ? keyValue : "!" + keyValue
         }
         keyRange.setValue(transposedKey)
@@ -291,7 +293,7 @@ function transposeChords(semitones: number, updateKey: boolean = true): void {
 
       try {
         return transpose(cell as string, semitones)
-      } catch (error) {
+      } catch {
         const cellStr = cell.toString()
         return cellStr.startsWith("!") ? cell : "!" + cellStr
       }
@@ -301,7 +303,7 @@ function transposeChords(semitones: number, updateKey: boolean = true): void {
   workingRange.setValues(transposedValues)
 }
 
-function setupTriggers(): void {
+export function setupTriggers(): void {
   const triggers = ScriptApp.getProjectTriggers()
 
   const existingOnChange = triggers.find(trigger =>
@@ -326,7 +328,7 @@ function setupTriggers(): void {
   }
 }
 
-function resetFormatting(): void {
+export function resetFormatting(): void {
   const printHeaderRange = SPREADSHEET().getRangeByName(PRINT_HEADER_RANGE_NAME)
   const printFooterRange = SPREADSHEET().getRangeByName(PRINT_FOOTER_RANGE_NAME)
   const printHeaderWidth = printHeaderRange ? printHeaderRange.getNumColumns() : null
@@ -405,7 +407,6 @@ const getSheet = (sheetName: string) => (): GoogleAppsScript.Spreadsheet.Sheet =
 
 const LYRICS_SHEET = getSheet(LYRICS_SHEET_NAME)
 const CHORDS_SHEET = getSheet(CHORDS_SHEET_NAME)
-const PRINT_SHEET = getSheet(PRINT_SHEET_NAME)
 
 const isInRange = (range: GoogleAppsScript.Spreadsheet.Range | null) =>
   (colIndex: number, rowIndex: number): boolean => {

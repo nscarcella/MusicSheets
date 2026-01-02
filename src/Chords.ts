@@ -22,7 +22,7 @@ interface ParsedChord {
   suffix: string
 }
 
-function transpose(chord: string, semitones: number): string {
+export function transpose(chord: string, semitones: number): string {
   if (!Number.isInteger(semitones)) throw new Error("Invalid argument: semitones must be an integer")
 
   const parsed = parseChord(chord)
@@ -35,7 +35,7 @@ function transpose(chord: string, semitones: number): string {
   )
 }
 
-function semitoneDistance(fromChord: string, toChord: string): number | undefined {
+export function semitoneDistance(fromChord: string, toChord: string): number | undefined {
   const fromParsed = parseChord(fromChord)
   if (!fromParsed) return undefined
 
@@ -49,7 +49,7 @@ function semitoneDistance(fromChord: string, toChord: string): number | undefine
 // UTILS
 // -----------------------------------------------------------------------------
 
-function parseChord(chord: string): ParsedChord | null {
+export function parseChord(chord: string): ParsedChord | null {
   const match = chord.match(CHORD_REGEX)
   if (!match) return null
 

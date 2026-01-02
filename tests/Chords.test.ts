@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import '../src/Chords'
+import { parseChord, semitoneDistance, transpose } from '../src/Chords'
 
 describe('transpose', () => {
   it('should transpose a simple chord up by 1 semitone', () => {
@@ -20,7 +20,7 @@ describe('transpose', () => {
 
   it('should transpose complex chords with suffixes', () => {
     expect(transpose('Cmaj7', 2)).toBe('Dmaj7')
-    expect(transpose('Am7', 5)).toBe('D#m7')
+    expect(transpose('Am7', 5)).toBe('Dm7')
   })
 
   it('should transpose slash chords', () => {
