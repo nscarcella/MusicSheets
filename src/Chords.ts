@@ -1,26 +1,17 @@
-const LETTER_PITCH: Record<string, number> = {
-  C: 0,
-  D: 2,
-  E: 4,
-  F: 5,
-  G: 7,
-  A: 9,
-  B: 11
-}
-
-const CANONICAL_NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+const CHROMATIC_PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 const CHORD_REGEX = /^([A-G])([#b]*)([^/]*)(?:\/([A-G])([#b]*))?$/
+
+
+interface Chord {
+  rootPitch: number
+  suffix: string
+  bassPitch: number | null
+}
 
 // -----------------------------------------------------------------------------
 // CHORD MANIPULATION
 // -----------------------------------------------------------------------------
-
-interface ParsedChord {
-  rootPitch: number
-  bassPitch: number | null
-  suffix: string
-}
 
 export function transpose(chord: string, semitones: number): string {
   if (!Number.isInteger(semitones)) throw new Error("Invalid argument: semitones must be an integer")
@@ -34,6 +25,7 @@ export function transpose(chord: string, semitones: number): string {
     parsed.bassPitch !== null ? transposePitch(parsed.bassPitch, semitones) : null
   )
 }
+
 
 export function semitoneDistance(fromChord: string, toChord: string): number | undefined {
   const fromParsed = parseChord(fromChord)
@@ -49,35 +41,34 @@ export function semitoneDistance(fromChord: string, toChord: string): number | u
 // UTILS
 // -----------------------------------------------------------------------------
 
-export function parseChord(chord: string): ParsedChord | null {
+export function parseChord(chord: string): Chord | null {
   const match = chord.match(CHORD_REGEX)
   if (!match) return null
 
   const [, rootLetter, rootAcc, suffix, bassLetter, bassAcc] = match
 
   return {
-    rootPitch: letterPitch(rootLetter, rootAcc),
-    bassPitch: bassLetter ? letterPitch(bassLetter, bassAcc) : null,
+    rootPitch: buildPitch(rootLetter, rootAcc),
+    bassPitch: bassLetter ? buildPitch(bassLetter, bassAcc) : null,
     suffix
   }
 }
 
-function letterPitch(letter: string, acc: string): number {
-  return LETTER_PITCH[letter] + accidentalOffset(acc)
-}
-
-function accidentalOffset(acc: string): number {
-  let sum = 0
-  for (const c of acc) sum += c === "#" ? 1 : -1
-  return sum
-}
 
 function transposePitch(pitch: number, semitones: number): number {
-  return ((pitch + semitones) % 12 + 12) % 12
+  const totalPitchClasses = CHROMATIC_PITCH_CLASSES.length
+  return ((pitch + semitones) % totalPitchClasses + totalPitchClasses) % totalPitchClasses
 }
 
+
+function buildPitch(letter: string, acc: string): number {
+  const offset = [...acc].reduce((sum, c) => sum + (c === "#" ? 1 : -1), 0)
+  return CHROMATIC_PITCH_CLASSES.indexOf(letter) + offset
+}
+
+
 function buildChord(rootPitch: number, suffix: string, bassPitch: number | null): string {
-  let result = CANONICAL_NOTES[rootPitch] + suffix
-  if (bassPitch !== null) result += "/" + CANONICAL_NOTES[bassPitch]
+  let result = CHROMATIC_PITCH_CLASSES[rootPitch] + suffix
+  if (bassPitch !== null) result += "/" + CHROMATIC_PITCH_CLASSES[bassPitch]
   return result
 }
