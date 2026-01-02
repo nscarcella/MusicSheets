@@ -40,6 +40,11 @@ describe('transpose', () => {
   it('should throw error for non-integer semitones', () => {
     expect(() => transpose('C', 1.5)).toThrow('semitones must be an integer')
   })
+
+  it('should handle chords with multiple accidentals', () => {
+    expect(transpose('C####', 1)).toBe('F')
+    expect(transpose('Cbbb', 2)).toBe('B')
+  })
 })
 
 describe('semitoneDistance', () => {
@@ -64,6 +69,11 @@ describe('semitoneDistance', () => {
 
   it('should work with complex chords', () => {
     expect(semitoneDistance('Cmaj7', 'Dmaj7')).toBe(2)
+  })
+
+  it('should handle chords with multiple accidentals', () => {
+    expect(semitoneDistance('C####', 'F')).toBe(1)
+    expect(semitoneDistance('Cbbb', 'A')).toBe(0)
   })
 })
 
@@ -97,5 +107,20 @@ describe('parseChord', () => {
     expect(parseChord('H')).toBeUndefined()
     expect(parseChord('1')).toBeUndefined()
     expect(parseChord('')).toBeUndefined()
+  })
+
+  it('should handle multiple sharps with wrapping', () => {
+    const result = parseChord('C####')
+    expect(result).toEqual({ rootPitch: 4, bassPitch: undefined, suffix: '' })
+  })
+
+  it('should handle multiple flats with wrapping', () => {
+    const result = parseChord('Cbbb')
+    expect(result).toEqual({ rootPitch: 9, bassPitch: undefined, suffix: '' })
+  })
+
+  it('should handle extreme accidentals', () => {
+    const result = parseChord('G#####')
+    expect(result).toEqual({ rootPitch: 0, bassPitch: undefined, suffix: '' })
   })
 })

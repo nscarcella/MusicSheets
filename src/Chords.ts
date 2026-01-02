@@ -39,7 +39,7 @@ export function semitoneDistance(from: Chord, to: Chord): number | undefined {
   const toParsed = parseChord(to)
   if (!toParsed) return undefined
 
-  return (toParsed.rootPitch - fromParsed.rootPitch + CHROMATIC_PITCH_CLASSES.length) % CHROMATIC_PITCH_CLASSES.length
+  return normalizePitch(toParsed.rootPitch - fromParsed.rootPitch)
 }
 
 // -----------------------------------------------------------------------------
@@ -60,13 +60,19 @@ export function parseChord(chord: Chord): ChordInfo | undefined {
 }
 
 
-function transposePitch(pitch: Pitch, semitones: number): Pitch {
+function normalizePitch(pitch: number): Pitch {
   const totalPitchClasses = CHROMATIC_PITCH_CLASSES.length
-  return ((pitch + semitones) % totalPitchClasses + totalPitchClasses) % totalPitchClasses
+  return ((pitch % totalPitchClasses) + totalPitchClasses) % totalPitchClasses
+}
+
+
+function transposePitch(pitch: Pitch, semitones: number): Pitch {
+  return normalizePitch(pitch + semitones)
 }
 
 
 function buildPitch(letter: DiatonicPitchClass, accidentals: string): Pitch {
   const offset = [...accidentals].reduce((sum, c) => sum + (c === "#" ? 1 : -1), 0)
-  return CHROMATIC_PITCH_CLASSES.indexOf(letter) + offset
+  const pitch = CHROMATIC_PITCH_CLASSES.indexOf(letter) + offset
+  return normalizePitch(pitch)
 }
