@@ -3,7 +3,7 @@ import { count, modulo } from "./Utils"
 const { fromEntries } = Object
 
 
-const CHORD_REGEX = /^([A-G])([#b]*)([^/]*)(?:\/([A-G])([#b]*))?$/
+const CHORD_REGEX = /^([A-G][#b]*)([^/]*)(?:\/([A-G][#b]*))?$/
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // CHORDS
@@ -19,9 +19,9 @@ export class Chord {
 
 
   static parse(str: string): Chord | undefined {
-    const [, pitchClass = '', accidentals = '', suffix = '', bassPitchClass = '', bassAccidentals = ''] = str.match(CHORD_REGEX) ?? []
-    const pitch = Pitch.parse(pitchClass, accidentals)
-    const bassPitch = Pitch.parse(bassPitchClass, bassAccidentals)
+    const [, root = "", suffix = "", bass = ""] = str.match(CHORD_REGEX) ?? []
+    const pitch = Pitch.parse(root)
+    const bassPitch = Pitch.parse(bass)
 
     return pitch && new Chord(pitch, suffix, bassPitch)
   }
@@ -80,8 +80,12 @@ export class Pitch {
     return Pitch.INSTANCES[modulo(value, Pitch.INSTANCES.length)]
   }
 
-  static parse(diatonalClass: string, accidentals: string): Pitch | undefined {
-    return Pitch.BY_NAME[diatonalClass]?.transpose(count(accidentals, '#') - count(accidentals, 'b'))
+  static parse(source: string): Pitch | undefined {
+    const diatonalClassName = source[0]
+    const accidentals = source.slice(1)
+    const offset = count(accidentals, "#") - count(accidentals, "b")
+
+    return Pitch.BY_NAME[diatonalClassName]?.transpose(offset)
   }
 
 
