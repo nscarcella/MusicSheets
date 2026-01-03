@@ -1,78 +1,105 @@
-const CHROMATIC_PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+import { count, modulo } from "./Utils"
+
+const { fromEntries } = Object
+
 
 const CHORD_REGEX = /^([A-G])([#b]*)([^/]*)(?:\/([A-G])([#b]*))?$/
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// CHORDS
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-type DiatonicPitchClass = "A" | "B" | "C" | "D" | "E" | "F" | "G"
-type Chord = string
-type Pitch = number
+export class Chord {
 
-interface ChordInfo {
-  rootPitch: Pitch
-  suffix: string
-  bassPitch: Pitch | undefined
-}
-
-// -----------------------------------------------------------------------------
-// CHORD MANIPULATION
-// -----------------------------------------------------------------------------
-
-export function transpose(chord: Chord, semitones: number): Chord {
-  if (!Number.isInteger(semitones)) throw new Error("Invalid argument: semitones must be an integer")
-
-  const parsed = parseChord(chord)
-  if (!parsed) throw new Error(`Chord "${chord}" is not syntactically valid`)
-
-  const rootPitch = transposePitch(parsed.rootPitch, semitones)
-  const bassPitch = parsed.bassPitch !== undefined ? transposePitch(parsed.bassPitch, semitones) : undefined
-
-  let result = CHROMATIC_PITCH_CLASSES[rootPitch] + parsed.suffix
-  if (bassPitch !== undefined) result += "/" + CHROMATIC_PITCH_CLASSES[bassPitch]
-  return result
-}
+  private constructor(
+    private readonly pitch: Pitch,
+    private readonly suffix: string,
+    private readonly bass?: Pitch
+  ) { }
 
 
-export function semitoneDistance(from: Chord, to: Chord): number | undefined {
-  const fromParsed = parseChord(from)
-  if (!fromParsed) return undefined
+  static parse(str: string): Chord | undefined {
+    const [, pitchClass = '', accidentals = '', suffix = '', bassPitchClass = '', bassAccidentals = ''] = str.match(CHORD_REGEX) ?? []
+    const pitch = Pitch.parse(pitchClass, accidentals)
+    const bassPitch = Pitch.parse(bassPitchClass, bassAccidentals)
 
-  const toParsed = parseChord(to)
-  if (!toParsed) return undefined
+    return pitch && new Chord(pitch, suffix, bassPitch)
+  }
 
-  return normalizePitch(toParsed.rootPitch - fromParsed.rootPitch)
-}
 
-// -----------------------------------------------------------------------------
-// UTILS
-// -----------------------------------------------------------------------------
+  transpose(semitones: number): Chord {
+    return new Chord(this.pitch.transpose(semitones), this.suffix, this.bass?.transpose(semitones))
+  }
 
-export function parseChord(chord: Chord): ChordInfo | undefined {
-  const match = chord.match(CHORD_REGEX)
-  if (!match) return undefined
+  semitonesTo(other: Chord): number {
+    return this.pitch.semitonesTo(other.pitch)
+  }
 
-  const [, diatonicPitchClass, accidentals, suffix, bassDiatonicPitchClass, bassAccidentals] = match
-
-  return {
-    rootPitch: buildPitch(diatonicPitchClass as DiatonicPitchClass, accidentals),
-    bassPitch: bassDiatonicPitchClass ? buildPitch(bassDiatonicPitchClass as DiatonicPitchClass, bassAccidentals) : undefined,
-    suffix
+  toString(preferFlats: boolean = false): string {
+    const root = this.pitch.toString(preferFlats)
+    const bass = this.bass ? `/${this.bass.toString(preferFlats)}` : ""
+    return `${root}${this.suffix}${bass}`
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// PITCH
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-function normalizePitch(pitch: number): Pitch {
-  const totalPitchClasses = CHROMATIC_PITCH_CLASSES.length
-  return ((pitch % totalPitchClasses) + totalPitchClasses) % totalPitchClasses
-}
+export class Pitch {
+
+  private constructor(
+    private readonly sharpLabel: string,
+    private readonly flatLabel: string = sharpLabel
+  ) { }
 
 
-function transposePitch(pitch: Pitch, semitones: number): Pitch {
-  return normalizePitch(pitch + semitones)
-}
+  private static readonly INSTANCES: readonly Pitch[] = [
+    new Pitch("C"),
+    new Pitch("C#", "Db"),
+    new Pitch("D"),
+    new Pitch("D#", "Eb"),
+    new Pitch("E"),
+    new Pitch("F"),
+    new Pitch("F#", "Gb"),
+    new Pitch("G"),
+    new Pitch("G#", "Ab"),
+    new Pitch("A"),
+    new Pitch("A#", "Bb"),
+    new Pitch("B"),
+  ]
+
+  private static readonly BY_NAME: Readonly<Record<string, Pitch | undefined>> = fromEntries(
+    Pitch.INSTANCES.flatMap(pitch => [
+      [pitch.sharpLabel, pitch],
+      [pitch.flatLabel, pitch]
+    ])
+  )
+
+  static fromValue(value: number): Pitch {
+    return Pitch.INSTANCES[modulo(value, Pitch.INSTANCES.length)]
+  }
+
+  static parse(diatonalClass: string, accidentals: string): Pitch | undefined {
+    return Pitch.BY_NAME[diatonalClass]?.transpose(count(accidentals, '#') - count(accidentals, 'b'))
+  }
 
 
-function buildPitch(letter: DiatonicPitchClass, accidentals: string): Pitch {
-  const offset = [...accidentals].reduce((sum, c) => sum + (c === "#" ? 1 : -1), 0)
-  const pitch = CHROMATIC_PITCH_CLASSES.indexOf(letter) + offset
-  return normalizePitch(pitch)
+  private get index(): number {
+    return Pitch.INSTANCES.indexOf(this)
+  }
+
+  transpose(semitones: number): Pitch {
+    if (!Number.isInteger(semitones)) throw new Error("Invalid argument: semitones must be an integer")
+
+    return Pitch.fromValue(this.index + semitones)
+  }
+
+  semitonesTo(other: Pitch): number {
+    return other.index - this.index
+  }
+
+  toString(preferFlats: boolean = false): string {
+    return preferFlats ? this.flatLabel : this.sharpLabel
+  }
 }

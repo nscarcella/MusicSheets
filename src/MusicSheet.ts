@@ -1,4 +1,4 @@
-import { parseChord, semitoneDistance, transpose } from "./Chords"
+import { Chord } from "./Chords"
 
 const LYRICS_SHEET_NAME = "Letra"
 const CHORDS_SHEET_NAME = "Acordes"
@@ -188,7 +188,7 @@ function handleKeyChange(editedRange: GoogleAppsScript.Spreadsheet.Range, oldVal
   if (!autoTransposeRange) return
 
   const newKey = keyRange.getValue() as string
-  const isNewKeyValid = newKey && newKey !== "" && parseChord(newKey)
+  const isNewKeyValid = newKey && newKey !== "" && Chord.parse(newKey)
 
   if (!isNewKeyValid) {
     if (autoTransposeRange.getValue()) {
@@ -201,9 +201,11 @@ function handleKeyChange(editedRange: GoogleAppsScript.Spreadsheet.Range, oldVal
 
   if (!oldValue || oldValue === "") return
 
-  const semitones = semitoneDistance(oldValue, newKey)
-  if (semitones === undefined) return
+  const oldChord = Chord.parse(oldValue)
+  const newChord = Chord.parse(newKey)
+  if (!oldChord || !newChord) return
 
+  const semitones = oldChord.semitonesTo(newChord)
   if (semitones === 0) return
 
   transposeChords(semitones, false)
@@ -234,7 +236,7 @@ function validateAutoTranspose(editedRange: GoogleAppsScript.Spreadsheet.Range):
   }
 
   const keyValue = keyRange.getValue() as string
-  const isKeyValid = keyValue && keyValue !== "" && parseChord(keyValue)
+  const isKeyValid = keyValue && keyValue !== "" && Chord.parse(keyValue)
 
   if (!isKeyValid) {
     autoTransposeRange.setValue(false)
@@ -256,9 +258,14 @@ function transposeChords(semitones: number, updateKey: boolean = true): void {
       const keyValue = keyRange.getValue() as string
       if (keyValue && keyValue !== "") {
         let transposedKey: string
-        try {
-          transposedKey = transpose(keyValue, semitones)
-        } catch {
+        const chord = Chord.parse(keyValue)
+        if (chord) {
+          try {
+            transposedKey = chord.transpose(semitones).toString()
+          } catch {
+            transposedKey = keyValue.toString().startsWith("!") ? keyValue : "!" + keyValue
+          }
+        } else {
           transposedKey = keyValue.toString().startsWith("!") ? keyValue : "!" + keyValue
         }
         keyRange.setValue(transposedKey)
@@ -291,9 +298,15 @@ function transposeChords(semitones: number, updateKey: boolean = true): void {
     return row.map(cell => {
       if (cell === "" || cell === null) return cell
 
-      try {
-        return transpose(cell as string, semitones)
-      } catch {
+      const chord = Chord.parse(cell as string)
+      if (chord) {
+        try {
+          return chord.transpose(semitones).toString()
+        } catch {
+          const cellStr = cell.toString()
+          return cellStr.startsWith("!") ? cell : "!" + cellStr
+        }
+      } else {
         const cellStr = cell.toString()
         return cellStr.startsWith("!") ? cell : "!" + cellStr
       }
