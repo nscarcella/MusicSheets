@@ -9,3 +9,7 @@ export function count<T>(iterable: Iterable<T>, element: T): number {
   }
   return count
 }
+
+export function compose<T>(...fns: Array<(value: T) => T>): (value: T) => T {
+  return (value: T) => fns.reduceRight((acc, fn) => fn(acc), value)
+}

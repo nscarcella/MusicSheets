@@ -1,4 +1,12 @@
 import { Chord } from "./Chords"
+import { compose } from "./Utils"
+
+type Spreadsheet = GoogleAppsScript.Spreadsheet.Spreadsheet
+type Sheet = GoogleAppsScript.Spreadsheet.Sheet
+type Range = GoogleAppsScript.Spreadsheet.Range
+type OnEdit = GoogleAppsScript.Events.SheetsOnEdit
+type OnChange = GoogleAppsScript.Events.SheetsOnChange
+
 
 const LYRICS_SHEET_NAME = "Letra"
 const CHORDS_SHEET_NAME = "Acordes"
@@ -20,6 +28,9 @@ const WIDE_COLUMN_WIDTH = 17
 const WIDE_COLUMN_PERIODICITY = 6
 const PADDING = 3
 
+
+const STRUCTURAL_CHANGES = ["INSERT_ROW", "INSERT_COLUMN", "REMOVE_ROW", "REMOVE_COLUMN", "OTHER"]
+
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // HOOKS
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -27,19 +38,18 @@ const PADDING = 3
 export function onOpen(): void {
   try {
     updateDocumentTitle()
-  } catch (error: unknown) {
-    warn("Unexpected error in onOpen hook", (error as Error).message)
+  } catch (error) {
+    warn("Unexpected error in onOpen hook", error instanceof Error ? error.message : undefined)
   }
 }
 
-export function onEdit(event: GoogleAppsScript.Events.SheetsOnEdit): void {
+export function onEdit(event: OnEdit): void {
   try {
     const editedRange = event.range
-    const sourceSheetName = editedRange.getSheet().getName()
 
-    switch (sourceSheetName) {
+    switch (editedRange.getSheet().getName()) {
       case LYRICS_SHEET_NAME:
-        syncLyrics(editedRange, CHORDS_SHEET())
+        syncLyricsToChordSheet(editedRange)
         break
 
       case CHORDS_SHEET_NAME:
@@ -48,21 +58,20 @@ export function onEdit(event: GoogleAppsScript.Events.SheetsOnEdit): void {
         revertEvenChordsEdits(editedRange)
         break
     }
-  } catch (error: unknown) {
-    warn("Unexpected error in onEdit hook", (error as Error).message)
+  } catch (error) {
+    warn("Unexpected error in onEdit hook", error instanceof Error ? error.message : undefined)
   }
 }
 
-export function onChange(event: GoogleAppsScript.Events.SheetsOnChange): void {
+export function onChange(event: OnChange): void {
   try {
-    const structuralChanges = ["INSERT_ROW", "INSERT_COLUMN", "REMOVE_ROW", "REMOVE_COLUMN", "OTHER"] as const
-    if (structuralChanges.includes(event.changeType as typeof structuralChanges[number])) {
+    if (STRUCTURAL_CHANGES.includes(event.changeType)) {
       const lyricsSheet = LYRICS_SHEET()
       const fullRange = lyricsSheet.getRange(1, 1, lyricsSheet.getMaxRows(), lyricsSheet.getMaxColumns())
-      syncLyrics(fullRange, CHORDS_SHEET())
+      syncLyricsToChordSheet(fullRange)
     }
-  } catch (error: unknown) {
-    warn("Unexpected error in onChange hook", (error as Error).message)
+  } catch (error) {
+    warn("Unexpected error in onChange hook", error instanceof Error ? error.message : undefined)
   }
 }
 
@@ -70,56 +79,54 @@ export function onChange(event: GoogleAppsScript.Events.SheetsOnChange): void {
 // SYNC LOGIC
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-function syncLyrics(range: GoogleAppsScript.Spreadsheet.Range, targetSheet: GoogleAppsScript.Spreadsheet.Sheet): void {
+function syncLyricsToChordSheet(range: Range): void {
+  const targetSheet = CHORDS_SHEET()
   const effectiveRange = workingArea(range)
   if (!effectiveRange) return
 
   const sourceSheet = effectiveRange.getSheet()
+  const sourceFrozenRows = sourceSheet.getFrozenRows()
+  const sourceFrozenColumns = sourceSheet.getFrozenColumns()
   const targetFrozenRows = targetSheet.getFrozenRows()
   const targetFrozenColumns = targetSheet.getFrozenColumns()
 
   const lastRowWithContent = sourceSheet.getDataRange().getLastRow()
-  const unfrozenRowsWithContent = Math.max(0, lastRowWithContent - sourceSheet.getFrozenRows())
+  const unfrozenRowsWithContent = Math.max(0, lastRowWithContent - sourceFrozenRows)
 
   ensureMinDimensions(
     targetSheet,
     targetFrozenRows + unfrozenRowsWithContent * 2,
-    targetFrozenColumns +
-    effectiveRange.getLastColumn() -
-    sourceSheet.getFrozenColumns()
+    targetFrozenColumns + effectiveRange.getLastColumn() - sourceFrozenColumns
   )
 
   const sourceValues = effectiveRange.getValues()
-  const rowsToSync = Math.min(sourceValues.length, unfrozenRowsWithContent - (effectiveRange.getRow() - sourceSheet.getFrozenRows() - 1))
+  const rowsToSync = Math.min(sourceValues.length, unfrozenRowsWithContent - (effectiveRange.getRow() - sourceFrozenRows - 1))
 
   if (rowsToSync === 0) return
 
-  const targetStartRow = targetFrozenRows + (effectiveRange.getRow() - sourceSheet.getFrozenRows()) * 2
-  const targetStartCol = targetFrozenColumns + effectiveRange.getColumn() - sourceSheet.getFrozenColumns()
-  const targetRowCount = rowsToSync * 2
-  const targetColCount = sourceValues[0].length
-
-  const targetRange = targetSheet.getRange(
-    targetStartRow,
-    targetStartCol,
-    targetRowCount,
-    targetColCount
+  const workingRange = effectiveRange.getSheet().getRange(
+    effectiveRange.getRow(),
+    effectiveRange.getColumn(),
+    rowsToSync,
+    sourceValues[0].length
   )
+
+  const targetRange = compose(
+    translateTo(1, 1),
+    scale(1, 2),
+    translateTo(targetFrozenColumns + 1, targetFrozenRows + 1),
+    projectInto(targetSheet)
+  )(workingRange)
+
   const targetValues = targetRange.getValues()
-
-  for (let rowOffset = 0; rowOffset < rowsToSync; rowOffset++) {
-    targetValues[rowOffset * 2] = sourceValues[rowOffset]
-  }
-
+  sourceValues.slice(0, rowsToSync).forEach((sourceRow, rowOffset) => {
+    targetValues[rowOffset * 2] = sourceRow
+  })
   targetRange.setValues(targetValues)
 }
 
-interface LyricsRowToRead {
-  rowOffset: number
-  absoluteLyricsRow: number
-}
 
-function revertEvenChordsEdits(editedRange: GoogleAppsScript.Spreadsheet.Range): void {
+function revertEvenChordsEdits(editedRange: Range): void {
   const effectiveChordsRange = workingArea(editedRange)
   if (!effectiveChordsRange) return
 
@@ -133,7 +140,10 @@ function revertEvenChordsEdits(editedRange: GoogleAppsScript.Spreadsheet.Range):
 
   const chordsValues = effectiveChordsRange.getValues()
 
-  const lyricsRowsToRead: LyricsRowToRead[] = []
+  const lyricsRowsToRead: {
+    rowOffset: number
+    absoluteLyricsRow: number
+  }[] = []
 
   for (let rowOffset = 0; rowOffset < chordsValues.length; rowOffset++) {
     const absoluteChordsRow = effectiveChordsRange.getRow() + rowOffset
@@ -168,27 +178,15 @@ function revertEvenChordsEdits(editedRange: GoogleAppsScript.Spreadsheet.Range):
   effectiveChordsRange.setValues(chordsValues)
 }
 
-function handleKeyChange(editedRange: GoogleAppsScript.Spreadsheet.Range, oldValue: string | undefined): void {
+function handleKeyChange(editedRange: Range, oldValue: string | undefined): void {
   const keyRange = SPREADSHEET().getRangeByName(KEY_RANGE_NAME)
-  if (!keyRange) return
-
-  const editedSheet = editedRange.getSheet()
-  const keySheet = keyRange.getSheet()
-
-  if (editedSheet.getName() !== keySheet.getName()) return
-
-  const editedRow = editedRange.getRow()
-  const editedCol = editedRange.getColumn()
-  const keyRow = keyRange.getRow()
-  const keyCol = keyRange.getColumn()
-
-  if (editedRow !== keyRow || editedCol !== keyCol) return
+  if (!keyRange || !rangesOverlap(editedRange, keyRange)) return
 
   const autoTransposeRange = SPREADSHEET().getRangeByName(AUTOTRANSPOSE_RANGE_NAME)
   if (!autoTransposeRange) return
 
-  const newKey = keyRange.getValue() as string
-  const isNewKeyValid = newKey && newKey !== "" && Chord.parse(newKey)
+  const newKey = keyRange.getValue()
+  const isNewKeyValid = newKey && Chord.parse(newKey)
 
   if (!isNewKeyValid) {
     if (autoTransposeRange.getValue()) {
@@ -211,21 +209,9 @@ function handleKeyChange(editedRange: GoogleAppsScript.Spreadsheet.Range, oldVal
   transposeChords(semitones, false)
 }
 
-function validateAutoTranspose(editedRange: GoogleAppsScript.Spreadsheet.Range): void {
+function validateAutoTranspose(editedRange: Range): void {
   const autoTransposeRange = SPREADSHEET().getRangeByName(AUTOTRANSPOSE_RANGE_NAME)
-  if (!autoTransposeRange) return
-
-  const editedSheet = editedRange.getSheet()
-  const autoTransposeSheet = autoTransposeRange.getSheet()
-
-  if (editedSheet.getName() !== autoTransposeSheet.getName()) return
-
-  const editedRow = editedRange.getRow()
-  const editedCol = editedRange.getColumn()
-  const autoTransposeRow = autoTransposeRange.getRow()
-  const autoTransposeCol = autoTransposeRange.getColumn()
-
-  if (editedRow !== autoTransposeRow || editedCol !== autoTransposeCol) return
+  if (!autoTransposeRange || !rangesOverlap(editedRange, autoTransposeRange)) return
 
   if (!autoTransposeRange.getValue()) return
 
@@ -235,8 +221,8 @@ function validateAutoTranspose(editedRange: GoogleAppsScript.Spreadsheet.Range):
     return
   }
 
-  const keyValue = keyRange.getValue() as string
-  const isKeyValid = keyValue && keyValue !== "" && Chord.parse(keyValue)
+  const keyValue = keyRange.getValue()
+  const isKeyValid = keyValue && Chord.parse(keyValue)
 
   if (!isKeyValid) {
     autoTransposeRange.setValue(false)
@@ -251,6 +237,11 @@ export function transposeUp(): void { transposeChords(1, true) }
 
 export function transposeDown(): void { transposeChords(-1, true) }
 
+function markAsInvalid(value: unknown): string {
+  const str = String(value)
+  return str.startsWith("!") ? str : "!" + str
+}
+
 function transposeChords(semitones: number, updateKey: boolean = true): void {
   if (updateKey) {
     const keyRange = SPREADSHEET().getRangeByName(KEY_RANGE_NAME)
@@ -263,10 +254,10 @@ function transposeChords(semitones: number, updateKey: boolean = true): void {
           try {
             transposedKey = chord.transpose(semitones).toString()
           } catch {
-            transposedKey = keyValue.toString().startsWith("!") ? keyValue : "!" + keyValue
+            transposedKey = markAsInvalid(keyValue)
           }
         } else {
-          transposedKey = keyValue.toString().startsWith("!") ? keyValue : "!" + keyValue
+          transposedKey = markAsInvalid(keyValue)
         }
         keyRange.setValue(transposedKey)
       }
@@ -303,12 +294,10 @@ function transposeChords(semitones: number, updateKey: boolean = true): void {
         try {
           return chord.transpose(semitones).toString()
         } catch {
-          const cellStr = cell.toString()
-          return cellStr.startsWith("!") ? cell : "!" + cellStr
+          return markAsInvalid(cell)
         }
       } else {
-        const cellStr = cell.toString()
-        return cellStr.startsWith("!") ? cell : "!" + cellStr
+        return markAsInvalid(cell)
       }
     })
   })
@@ -410,9 +399,9 @@ export function resetFormatting(): void {
 // UTILS
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-const SPREADSHEET = (): GoogleAppsScript.Spreadsheet.Spreadsheet => SpreadsheetApp.getActive()
+const SPREADSHEET = (): Spreadsheet => SpreadsheetApp.getActive()
 
-const getSheet = (sheetName: string) => (): GoogleAppsScript.Spreadsheet.Sheet => {
+const getSheet = (sheetName: string) => (): Sheet => {
   const sheet = SPREADSHEET().getSheetByName(sheetName)
   if (!sheet) throw new Error(`${sheetName} sheet not found`)
   return sheet
@@ -421,7 +410,55 @@ const getSheet = (sheetName: string) => (): GoogleAppsScript.Spreadsheet.Sheet =
 const LYRICS_SHEET = getSheet(LYRICS_SHEET_NAME)
 const CHORDS_SHEET = getSheet(CHORDS_SHEET_NAME)
 
-const isInRange = (range: GoogleAppsScript.Spreadsheet.Range | null) =>
+
+const translate = (x: number = 0, y: number = 0) => (range: Range): Range =>
+  translateTo(range.getColumn() + x, range.getRow() + y)(range)
+
+const translateTo = (x: number, y: number) => (range: Range): Range =>
+  range.getSheet().getRange(
+    y,
+    x,
+    range.getNumRows(),
+    range.getNumColumns()
+  )
+
+const scale = (x: number = 1, y: number = 1) => (range: Range): Range =>
+  range.getSheet().getRange(
+    range.getRow(),
+    range.getColumn(),
+    range.getNumRows() * y,
+    range.getNumColumns() * x
+  )
+
+const projectInto = (targetSheet: Sheet) => (range: Range): Range =>
+  targetSheet.getRange(
+    range.getRow(),
+    range.getColumn(),
+    range.getNumRows(),
+    range.getNumColumns()
+  )
+
+function rangesOverlap(rangeA: Range, rangeB: Range): boolean {
+  if (rangeA.getSheet().getName() !== rangeB.getSheet().getName()) return false
+
+  const aFirstRow = rangeA.getRow()
+  const aLastRow = rangeA.getLastRow()
+  const aFirstCol = rangeA.getColumn()
+  const aLastCol = rangeA.getLastColumn()
+
+  const bFirstRow = rangeB.getRow()
+  const bLastRow = rangeB.getLastRow()
+  const bFirstCol = rangeB.getColumn()
+  const bLastCol = rangeB.getLastColumn()
+
+  const rowsOverlap = aFirstRow <= bLastRow && aLastRow >= bFirstRow
+  const colsOverlap = aFirstCol <= bLastCol && aLastCol >= bFirstCol
+
+  return rowsOverlap && colsOverlap
+}
+
+
+const isInRange = (range: Range | null) =>
   (colIndex: number, rowIndex: number): boolean => {
     if (!range) return false
     return (
@@ -432,7 +469,7 @@ const isInRange = (range: GoogleAppsScript.Spreadsheet.Range | null) =>
     )
   }
 
-function workingArea(range: GoogleAppsScript.Spreadsheet.Range): GoogleAppsScript.Spreadsheet.Range | null {
+function workingArea(range: Range): Range | null {
   if (!range) return range
 
   const sheet = range.getSheet()
@@ -459,7 +496,7 @@ function workingArea(range: GoogleAppsScript.Spreadsheet.Range): GoogleAppsScrip
   )
 }
 
-function ensureMinDimensions(sheet: GoogleAppsScript.Spreadsheet.Sheet, minRows: number, minColumns: number): void {
+function ensureMinDimensions(sheet: Sheet, minRows: number, minColumns: number): void {
   if (sheet.getMaxRows() < minRows) {
     sheet.insertRowsAfter(sheet.getMaxRows(), minRows - sheet.getMaxRows())
   }

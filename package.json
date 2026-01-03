@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc && node scripts/post-build.js && cp appsscript.json dist/appsscript.json",
     "prepush": "npm run test && npm run lint:fix",
-    "push": "npm run build && clasp push",
+    "push": "npm run prepush && npm run build && clasp push",
     "watch": "tsc --watch",
     "deploy": "npm run build && clasp push && clasp deploy",
     "lint": "eslint .",
