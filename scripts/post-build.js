@@ -18,7 +18,9 @@ const TRANSFORMATIONS = [
 ]
 
 function stripExports(content) {
-  return content.replace(/^export\s+(function|const|let|var|class)/gm, "$1")
+  return content
+    .replace(/^export\s+(function|const|let|var|class)/gm, "$1")
+    .replace(/^export\s*\{\s*\}/gm, "")
 }
 
 function stripImports(content) {

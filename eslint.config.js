@@ -37,6 +37,8 @@ export default defineConfig(
 			"semi": ["warn", "never"],
 			"no-trailing-spaces": "warn",
 			"quotes": ["warn", "double", { avoidEscape: true }],
+			"@typescript-eslint/no-namespace": "off",
+			"@stylistic/no-extra-parens": ["warn", "all", { nestedBinaryExpressions: false }],
 			"@stylistic/member-delimiter-style": [
 				"warn",
 				{

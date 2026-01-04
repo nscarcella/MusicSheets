@@ -1,5 +1,5 @@
 import { Chord } from "./Chords"
-import { compose } from "./Utils"
+import "./Range"
 
 type Spreadsheet = GoogleAppsScript.Spreadsheet.Spreadsheet
 type Sheet = GoogleAppsScript.Spreadsheet.Sheet
@@ -66,9 +66,10 @@ export function onEdit(event: OnEdit): void {
 export function onChange(event: OnChange): void {
   try {
     if (STRUCTURAL_CHANGES.includes(event.changeType)) {
-      const lyricsSheet = LYRICS_SHEET()
-      const fullRange = lyricsSheet.getRange(1, 1, lyricsSheet.getMaxRows(), lyricsSheet.getMaxColumns())
-      syncLyricsToChordSheet(fullRange)
+      const sourceSheet = LYRICS_SHEET()
+      const effectiveRange = getWorkingArea(sourceSheet).resizeTo(undefined, sourceSheet.getDataRange().getNumRows())
+
+      syncLyricsToChordSheet(effectiveRange)
     }
   } catch (error) {
     warn("Unexpected error in onChange hook", error instanceof Error ? error.message : undefined)
@@ -80,58 +81,38 @@ export function onChange(event: OnChange): void {
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 function syncLyricsToChordSheet(range: Range): void {
+  const sourceSheet = range.getSheet()
+  const sourceWorkingArea = getWorkingArea(sourceSheet)
+
   const targetSheet = CHORDS_SHEET()
-  const effectiveRange = workingArea(range)
-  if (!effectiveRange) return
+  const targetWorkingArea = getWorkingArea(targetSheet)
 
-  const sourceSheet = effectiveRange.getSheet()
-  const sourceFrozenRows = sourceSheet.getFrozenRows()
-  const sourceFrozenColumns = sourceSheet.getFrozenColumns()
-  const targetFrozenRows = targetSheet.getFrozenRows()
-  const targetFrozenColumns = targetSheet.getFrozenColumns()
+  const sourceRange = sourceWorkingArea.intersect(range)
+  if (!sourceRange) return
 
-  const lastRowWithContent = sourceSheet.getDataRange().getLastRow()
-  const unfrozenRowsWithContent = Math.max(0, lastRowWithContent - sourceFrozenRows)
-
-  ensureMinDimensions(
-    targetSheet,
-    targetFrozenRows + unfrozenRowsWithContent * 2,
-    targetFrozenColumns + effectiveRange.getLastColumn() - sourceFrozenColumns
-  )
-
-  const sourceValues = effectiveRange.getValues()
-  const rowsToSync = Math.min(sourceValues.length, unfrozenRowsWithContent - (effectiveRange.getRow() - sourceFrozenRows - 1))
-
-  if (rowsToSync === 0) return
-
-  const workingRange = effectiveRange.getSheet().getRange(
-    effectiveRange.getRow(),
-    effectiveRange.getColumn(),
-    rowsToSync,
-    sourceValues[0].length
-  )
-
-  const targetRange = compose(
-    translateTo(1, 1),
-    scale(1, 2),
-    translateTo(targetFrozenColumns + 1, targetFrozenRows + 1),
-    projectInto(targetSheet)
-  )(workingRange)
+  const targetRange = sourceRange
+    .projectInto(targetSheet)
+    .scale(1, 2)
+    .translate(
+      targetWorkingArea.getColumn() - sourceWorkingArea.getColumn(),
+      targetWorkingArea.getRow() - sourceWorkingArea.getRow() * 2 + sourceRange.getRow()
+    )
 
   const targetValues = targetRange.getValues()
-  sourceValues.slice(0, rowsToSync).forEach((sourceRow, rowOffset) => {
-    targetValues[rowOffset * 2] = sourceRow
+  sourceRange.getValues().forEach((sourceRow, rowOffset) => {
+    targetValues[rowOffset * 2 + 1] = sourceRow
   })
   targetRange.setValues(targetValues)
 }
 
 
 function revertEvenChordsEdits(editedRange: Range): void {
-  const effectiveChordsRange = workingArea(editedRange)
+  const lyricsSheet = LYRICS_SHEET()
+
+  const effectiveChordsRange = getWorkingArea(CHORDS_SHEET()).intersect(editedRange)
   if (!effectiveChordsRange) return
 
   const chordsSheet = effectiveChordsRange.getSheet()
-  const lyricsSheet = LYRICS_SHEET()
 
   const chordsFrozenRows = chordsSheet.getFrozenRows()
   const chordsFrozenColumns = chordsSheet.getFrozenColumns()
@@ -180,7 +161,7 @@ function revertEvenChordsEdits(editedRange: Range): void {
 
 function handleKeyChange(editedRange: Range, oldValue: string | undefined): void {
   const keyRange = SPREADSHEET().getRangeByName(KEY_RANGE_NAME)
-  if (!keyRange || !rangesOverlap(editedRange, keyRange)) return
+  if (!keyRange || !editedRange.overlapsWith(keyRange)) return
 
   const autoTransposeRange = SPREADSHEET().getRangeByName(AUTOTRANSPOSE_RANGE_NAME)
   if (!autoTransposeRange) return
@@ -211,7 +192,7 @@ function handleKeyChange(editedRange: Range, oldValue: string | undefined): void
 
 function validateAutoTranspose(editedRange: Range): void {
   const autoTransposeRange = SPREADSHEET().getRangeByName(AUTOTRANSPOSE_RANGE_NAME)
-  if (!autoTransposeRange || !rangesOverlap(editedRange, autoTransposeRange)) return
+  if (!autoTransposeRange || !editedRange.overlapsWith(autoTransposeRange)) return
 
   if (!autoTransposeRange.getValue()) return
 
@@ -339,11 +320,11 @@ export function resetFormatting(): void {
     const frozenColumnCount = sheet.getFrozenColumns()
     const totalColumnCount = sheet.getMaxColumns()
     const isPrintSheet = sheet.getName() === PRINT_SHEET_NAME
-    const isInPrintHeader = isInRange(isPrintSheet ? printHeaderRange : null)
-    const isInPrintFooter = isInRange(isPrintSheet ? printFooterRange : null)
 
     for (let columnIndex = 1; columnIndex <= totalColumnCount; columnIndex++) {
-      if (isInPrintHeader(columnIndex, 1) || isInPrintFooter(columnIndex, 1)) continue
+      const cellRange = sheet.getRange(1, columnIndex, 1, 1)
+      if ((isPrintSheet && printHeaderRange && cellRange.overlapsWith(printHeaderRange)) ||
+        (isPrintSheet && printFooterRange && cellRange.overlapsWith(printFooterRange))) continue
 
       let columnWidth: number
       let effectiveColumnIndex = columnIndex
@@ -354,9 +335,9 @@ export function resetFormatting(): void {
 
       columnWidth =
         effectiveColumnIndex <= frozenColumnCount
-          ? (columnWidth = WIDE_COLUMN_WIDTH + 2 * PADDING)
+          ? columnWidth = WIDE_COLUMN_WIDTH + 2 * PADDING
           : effectiveColumnIndex === frozenColumnCount + 1
-            ? (columnWidth = WIDE_COLUMN_WIDTH + PADDING)
+            ? columnWidth = WIDE_COLUMN_WIDTH + PADDING
             : (effectiveColumnIndex - (frozenColumnCount + 1)) % WIDE_COLUMN_PERIODICITY === 0
               ? WIDE_COLUMN_WIDTH
               : NORMAL_COLUMN_WIDTH
@@ -411,102 +392,16 @@ const LYRICS_SHEET = getSheet(LYRICS_SHEET_NAME)
 const CHORDS_SHEET = getSheet(CHORDS_SHEET_NAME)
 
 
-const translate = (x: number = 0, y: number = 0) => (range: Range): Range =>
-  translateTo(range.getColumn() + x, range.getRow() + y)(range)
+function getWorkingArea(sheet: Sheet): Range {
+  const frozenRows = sheet.getFrozenRows()
+  const frozenColumns = sheet.getFrozenColumns()
+  const rightTrayWidth = sheet.getName() === LYRICS_SHEET_NAME
+    ? SPREADSHEET().getRangeByName(LYRICS_RIGHT_TRAY_RANGE_NAME)?.getNumColumns() ?? 0
+    : 0
 
-const translateTo = (x: number, y: number) => (range: Range): Range =>
-  range.getSheet().getRange(
-    y,
-    x,
-    range.getNumRows(),
-    range.getNumColumns()
-  )
-
-const scale = (x: number = 1, y: number = 1) => (range: Range): Range =>
-  range.getSheet().getRange(
-    range.getRow(),
-    range.getColumn(),
-    range.getNumRows() * y,
-    range.getNumColumns() * x
-  )
-
-const projectInto = (targetSheet: Sheet) => (range: Range): Range =>
-  targetSheet.getRange(
-    range.getRow(),
-    range.getColumn(),
-    range.getNumRows(),
-    range.getNumColumns()
-  )
-
-function rangesOverlap(rangeA: Range, rangeB: Range): boolean {
-  if (rangeA.getSheet().getName() !== rangeB.getSheet().getName()) return false
-
-  const aFirstRow = rangeA.getRow()
-  const aLastRow = rangeA.getLastRow()
-  const aFirstCol = rangeA.getColumn()
-  const aLastCol = rangeA.getLastColumn()
-
-  const bFirstRow = rangeB.getRow()
-  const bLastRow = rangeB.getLastRow()
-  const bFirstCol = rangeB.getColumn()
-  const bLastCol = rangeB.getLastColumn()
-
-  const rowsOverlap = aFirstRow <= bLastRow && aLastRow >= bFirstRow
-  const colsOverlap = aFirstCol <= bLastCol && aLastCol >= bFirstCol
-
-  return rowsOverlap && colsOverlap
-}
-
-
-const isInRange = (range: Range | null) =>
-  (colIndex: number, rowIndex: number): boolean => {
-    if (!range) return false
-    return (
-      rowIndex >= range.getRow() &&
-      rowIndex <= range.getLastRow() &&
-      colIndex >= range.getColumn() &&
-      colIndex <= range.getLastColumn()
-    )
-  }
-
-function workingArea(range: Range): Range | null {
-  if (!range) return range
-
-  const sheet = range.getSheet()
-  const startRow = Math.max(range.getRow(), sheet.getFrozenRows() + 1)
-  const startColumn = Math.max(range.getColumn(), sheet.getFrozenColumns() + 1)
-  const endRow = range.getLastRow()
-  let endColumn = range.getLastColumn()
-
-  if (sheet.getName() === LYRICS_SHEET_NAME) {
-    const namedRange = SPREADSHEET().getRangeByName(LYRICS_RIGHT_TRAY_RANGE_NAME)
-    if (namedRange) {
-      const rightTrayStartColumn = namedRange.getColumn()
-      endColumn = Math.min(endColumn, rightTrayStartColumn - 1)
-    }
-  }
-
-  if (startRow > endRow || startColumn > endColumn) return null
-
-  return sheet.getRange(
-    startRow,
-    startColumn,
-    endRow - startRow + 1,
-    endColumn - startColumn + 1
-  )
-}
-
-function ensureMinDimensions(sheet: Sheet, minRows: number, minColumns: number): void {
-  if (sheet.getMaxRows() < minRows) {
-    sheet.insertRowsAfter(sheet.getMaxRows(), minRows - sheet.getMaxRows())
-  }
-
-  if (sheet.getMaxColumns() < minColumns) {
-    sheet.insertColumnsAfter(
-      sheet.getMaxColumns(),
-      minColumns - sheet.getMaxColumns()
-    )
-  }
+  return sheet.fullRange()
+    .resize(-frozenColumns - rightTrayWidth, -frozenRows)
+    .translate(frozenColumns, frozenRows)
 }
 
 function updateDocumentTitle(): void {
@@ -516,9 +411,7 @@ function updateDocumentTitle(): void {
   }
 }
 
-type ToastFunction = (title?: string, message?: string) => void
-
-const toast = (icon: string): ToastFunction => (title = "", message = "") => {
+const toast = (icon: string) => (title = "", message = "") => {
   SPREADSHEET().toast(message, icon + " " + title, 10)
 }
 
