@@ -152,10 +152,13 @@ function handleKeyChange(range: Range, oldValue: string | undefined): void {
 }
 
 function disableAutoTransposeIfKeyIsInvalid(editedRange: Range): void {
+  const keyRange = SPREADSHEET().getRangeByName(KEY_RANGE_NAME)
   const autoTransposeRange = SPREADSHEET().getRangeByName(AUTOTRANSPOSE_RANGE_NAME)
-  if (!autoTransposeRange?.overlapsWith(editedRange) || !autoTransposeRange?.getValue()) return
 
-  const key = Chord.parse(SPREADSHEET().getRangeByName(KEY_RANGE_NAME)?.getValue() ?? "")
+  if (!keyRange?.overlapsWith(editedRange) && !autoTransposeRange?.overlapsWith(editedRange)) return
+  if (!autoTransposeRange?.getValue()) return
+
+  const key = Chord.parse(keyRange?.getValue() ?? "")
   if (!key) autoTransposeRange.setValue(false)
 }
 
