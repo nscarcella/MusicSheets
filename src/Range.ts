@@ -1,8 +1,6 @@
 type Range = GoogleAppsScript.Spreadsheet.Range
 type Sheet = GoogleAppsScript.Spreadsheet.Sheet
 
-const { ceil } = Math
-
 
 declare global {
   namespace GoogleAppsScript.Spreadsheet {
@@ -56,7 +54,7 @@ declare global {
   RangePrototype.scale = function (this: Range, x: number = 1, y: number = 1): Range {
     if (x <= 0 || y <= 0) throw new Error(`Invalid scale multiplier: x=${x}, y=${y}`)
 
-    return this.getSheet().getRange(this.getRow(), this.getColumn(), ceil(this.getNumRows() * y), ceil(this.getNumColumns() * x))
+    return this.getSheet().getRange(this.getRow(), this.getColumn(), Math.ceil(this.getNumRows() * y), Math.ceil(this.getNumColumns() * x))
   }
 
   RangePrototype.resize = function (this: Range, x: number = 0, y: number = 0): Range {

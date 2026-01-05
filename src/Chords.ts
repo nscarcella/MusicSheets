@@ -1,7 +1,5 @@
 import { count, modulo } from "./Utils"
 
-const { fromEntries } = Object
-
 
 const CHORD_REGEX = /^([A-G][#b]*)([^/]*)(?:\/([A-G][#b]*))?$/
 
@@ -69,7 +67,7 @@ export class Pitch {
     new Pitch("B"),
   ]
 
-  private static readonly BY_NAME: Readonly<Record<string, Pitch | undefined>> = fromEntries(
+  private static readonly BY_NAME: Readonly<Record<string, Pitch | undefined>> = Object.fromEntries(
     Pitch.INSTANCES.flatMap(pitch => [
       [pitch.sharpLabel, pitch],
       [pitch.flatLabel, pitch]

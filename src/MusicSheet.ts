@@ -7,8 +7,6 @@ type Range = GoogleAppsScript.Spreadsheet.Range
 type OnEdit = GoogleAppsScript.Events.SheetsOnEdit
 type OnChange = GoogleAppsScript.Events.SheetsOnChange
 
-const { ceil } = Math
-
 
 const LYRICS_SHEET_NAME = "Letra"
 const CHORDS_SHEET_NAME = "Acordes"
@@ -130,7 +128,7 @@ function syncLyricsFromChordSheet(range: Range): void {
     .scale(1, 0.5)
     .translate(
       sourceWorkingArea.getColumn() - targetWorkingArea.getColumn(),
-      sourceWorkingArea.getRow() - targetWorkingArea.getRow() - ceil((targetRange.getRow() - targetWorkingArea.getRow()) / 2)
+      sourceWorkingArea.getRow() - targetWorkingArea.getRow() - Math.ceil((targetRange.getRow() - targetWorkingArea.getRow()) / 2)
     )
 
   const targetValues = targetRange.getValues()
