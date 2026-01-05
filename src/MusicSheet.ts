@@ -274,8 +274,6 @@ export function resetFormatting(): void {
       sheet.getDataRange().setFontFamily(FONT_FAMILY).setFontSize(FONT_SIZE)
     }
   })
-
-  success("Format reset", "Done")
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
