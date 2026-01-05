@@ -147,7 +147,7 @@ function handleKeyChange(range: Range, oldValue: string | undefined): void {
     const newKey = Chord.parse(keyRange.getValue() ?? "")
     const oldKey = Chord.parse(oldValue ?? "")
 
-    newKey && oldKey && transposeAllChords(oldKey.semitonesTo(newKey), false)
+    newKey && oldKey && transposeAll(oldKey.semitonesTo(newKey), false)
   }
 }
 
@@ -163,9 +163,9 @@ function disableAutoTransposeIfKeyIsInvalid(editedRange: Range): void {
 // ACTIONS
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-export function transposeUp(): void { transposeAllChords(1) }
+export function transposeUp(): void { transposeAll(1) }
 
-export function transposeDown(): void { transposeAllChords(-1) }
+export function transposeDown(): void { transposeAll(-1) }
 
 function markAsInvalid(value: unknown): string {
   const str = String(value)
@@ -173,14 +173,14 @@ function markAsInvalid(value: unknown): string {
 }
 
 
-function transposeAllChords(semitones: number, updateKey: boolean = true): void {
+function transposeAll(semitones: number, updateKey: boolean = true): void {
   if (semitones === 0) return
 
   if (updateKey) {
     const keyRange = SPREADSHEET().getRangeByName(KEY_RANGE_NAME)
     const key = keyRange && Chord.parse(keyRange.getValue())
 
-    keyRange?.setValue(key?.transpose(semitones) ?? markAsInvalid(keyRange.getValue()))
+    keyRange?.setValue(key?.transpose(semitones).toString() ?? markAsInvalid(keyRange.getValue()))
   }
 
   const range = getWorkingArea(CHORDS_SHEET()).intersect(CHORDS_SHEET().getDataRange())
@@ -189,7 +189,7 @@ function transposeAllChords(semitones: number, updateKey: boolean = true): void 
   const values = range.getValues()
   values.forEach((row, rowIndex) => {
     if (rowIndex % 2 === 1) return
-    values[rowIndex] = row.map(cell => Chord.parse(cell)?.transpose(semitones) ?? markAsInvalid(cell))
+    values[rowIndex] = row.map(cell => cell && (Chord.parse(`${cell}`)?.transpose(semitones).toString() ?? markAsInvalid(cell)))
   })
   range.setValues(values)
 }
