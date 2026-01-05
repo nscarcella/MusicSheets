@@ -7,6 +7,7 @@
     "build": "tsc && node scripts/post-build.js && cp appsscript.json dist/appsscript.json",
     "prepush": "npm run test && npm run lint:fix",
     "push": "npm run prepush && npm run build && clasp push",
+    "deploy": "npm run push && clasp deploy",
     "watch": "tsc --watch",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
