@@ -7,6 +7,8 @@ type Range = GoogleAppsScript.Spreadsheet.Range
 type OnEdit = GoogleAppsScript.Events.SheetsOnEdit
 type OnChange = GoogleAppsScript.Events.SheetsOnChange
 
+const { ceil } = Math
+
 
 const LYRICS_SHEET_NAME = "Letra"
 const CHORDS_SHEET_NAME = "Acordes"
@@ -54,8 +56,8 @@ export function onEdit(event: OnEdit): void {
 
       case CHORDS_SHEET_NAME:
         handleKeyChange(editedRange, event.oldValue)
-        validateAutoTranspose(editedRange)
-        revertEvenChordsEdits(editedRange)
+        disableAutoTransposeIfKeyIsInvalid(editedRange)
+        syncLyricsFromChordSheet(editedRange)
         break
     }
   } catch (error) {
@@ -95,7 +97,7 @@ function syncLyricsToChordSheet(range: Range): void {
     .scale(1, 2)
     .translate(
       targetWorkingArea.getColumn() - sourceWorkingArea.getColumn(),
-      targetWorkingArea.getRow() - sourceWorkingArea.getRow() * 2 + sourceRange.getRow()
+      targetWorkingArea.getRow() - sourceWorkingArea.getRow() + (sourceRange.getRow() - sourceWorkingArea.getRow())
     )
 
   const targetValues = targetRange.getValues()
@@ -106,185 +108,94 @@ function syncLyricsToChordSheet(range: Range): void {
 }
 
 
-function revertEvenChordsEdits(editedRange: Range): void {
-  const lyricsSheet = LYRICS_SHEET()
+function syncLyricsFromChordSheet(range: Range): void {
+  const sourceSheet = LYRICS_SHEET()
+  const sourceWorkingArea = getWorkingArea(sourceSheet)
 
-  const effectiveChordsRange = getWorkingArea(CHORDS_SHEET()).intersect(editedRange)
-  if (!effectiveChordsRange) return
+  const targetSheet = range.getSheet()
+  const targetWorkingArea = getWorkingArea(targetSheet)
 
-  const chordsSheet = effectiveChordsRange.getSheet()
+  const intersected = targetWorkingArea.intersect(range)
+  if (!intersected) return
 
-  const chordsFrozenRows = chordsSheet.getFrozenRows()
-  const chordsFrozenColumns = chordsSheet.getFrozenColumns()
-  const lyricsFrozenRows = lyricsSheet.getFrozenRows()
-  const lyricsFrozenColumns = lyricsSheet.getFrozenColumns()
+  const targetStartsAtChordRow = (intersected.getRow() - targetWorkingArea.getRow()) % 2 === 0
+  if (targetStartsAtChordRow && intersected.getNumRows() === 1) return
 
-  const chordsValues = effectiveChordsRange.getValues()
+  const targetRange = targetStartsAtChordRow
+    ? intersected.translate(0, 1).resize(0, -1)
+    : intersected
 
-  const lyricsRowsToRead: {
-    rowOffset: number
-    absoluteLyricsRow: number
-  }[] = []
+  const sourceRange = targetRange
+    .projectInto(sourceSheet)
+    .scale(1, 0.5)
+    .translate(
+      sourceWorkingArea.getColumn() - targetWorkingArea.getColumn(),
+      sourceWorkingArea.getRow() - targetWorkingArea.getRow() - ceil((targetRange.getRow() - targetWorkingArea.getRow()) / 2)
+    )
 
-  for (let rowOffset = 0; rowOffset < chordsValues.length; rowOffset++) {
-    const absoluteChordsRow = effectiveChordsRange.getRow() + rowOffset
-    const relativeRowIndex = absoluteChordsRow - chordsFrozenRows - 1
-
-    if (relativeRowIndex % 2 === 0) continue
-
-    const absoluteLyricsRow = lyricsFrozenRows + Math.floor(relativeRowIndex / 2) + 1
-    lyricsRowsToRead.push({ rowOffset, absoluteLyricsRow })
-  }
-
-  if (lyricsRowsToRead.length === 0) return
-
-  const minLyricsRow = Math.min(...lyricsRowsToRead.map(r => r.absoluteLyricsRow))
-  const maxLyricsRow = Math.max(...lyricsRowsToRead.map(r => r.absoluteLyricsRow))
-  const relativeChordsColumn = effectiveChordsRange.getColumn() - chordsFrozenColumns - 1
-  const absoluteLyricsColumn = lyricsFrozenColumns + relativeChordsColumn + 1
-
-  const lyricsRange = lyricsSheet.getRange(
-    minLyricsRow,
-    absoluteLyricsColumn,
-    maxLyricsRow - minLyricsRow + 1,
-    chordsValues[0].length
-  )
-  const lyricsValues = lyricsRange.getValues()
-
-  for (const { rowOffset, absoluteLyricsRow } of lyricsRowsToRead) {
-    const lyricsRowOffset = absoluteLyricsRow - minLyricsRow
-    chordsValues[rowOffset] = lyricsValues[lyricsRowOffset]
-  }
-
-  effectiveChordsRange.setValues(chordsValues)
+  const targetValues = targetRange.getValues()
+  sourceRange.getValues().forEach((sourceRow, rowOffset) => {
+    targetValues[rowOffset * 2] = sourceRow
+  })
+  targetRange.setValues(targetValues)
 }
 
-function handleKeyChange(editedRange: Range, oldValue: string | undefined): void {
+function handleKeyChange(range: Range, oldValue: string | undefined): void {
   const keyRange = SPREADSHEET().getRangeByName(KEY_RANGE_NAME)
-  if (!keyRange || !editedRange.overlapsWith(keyRange)) return
+  if (!keyRange?.overlapsWith(range)) return
 
-  const autoTransposeRange = SPREADSHEET().getRangeByName(AUTOTRANSPOSE_RANGE_NAME)
-  if (!autoTransposeRange) return
+  const autoTranspose = SPREADSHEET().getRangeByName(AUTOTRANSPOSE_RANGE_NAME)?.getValue()
+  if (autoTranspose) {
+    const newKey = Chord.parse(keyRange.getValue() ?? "")
+    const oldKey = Chord.parse(oldValue ?? "")
 
-  const newKey = keyRange.getValue()
-  const isNewKeyValid = newKey && Chord.parse(newKey)
-
-  if (!isNewKeyValid) {
-    if (autoTransposeRange.getValue()) {
-      autoTransposeRange.setValue(false)
-    }
-    return
+    newKey && oldKey && transposeAllChords(oldKey.semitonesTo(newKey), false)
   }
-
-  if (!autoTransposeRange.getValue()) return
-
-  if (!oldValue || oldValue === "") return
-
-  const oldChord = Chord.parse(oldValue)
-  const newChord = Chord.parse(newKey)
-  if (!oldChord || !newChord) return
-
-  const semitones = oldChord.semitonesTo(newChord)
-  if (semitones === 0) return
-
-  transposeChords(semitones, false)
 }
 
-function validateAutoTranspose(editedRange: Range): void {
+function disableAutoTransposeIfKeyIsInvalid(editedRange: Range): void {
   const autoTransposeRange = SPREADSHEET().getRangeByName(AUTOTRANSPOSE_RANGE_NAME)
-  if (!autoTransposeRange || !editedRange.overlapsWith(autoTransposeRange)) return
+  if (!autoTransposeRange?.overlapsWith(editedRange) || !autoTransposeRange?.getValue()) return
 
-  if (!autoTransposeRange.getValue()) return
-
-  const keyRange = SPREADSHEET().getRangeByName(KEY_RANGE_NAME)
-  if (!keyRange) {
-    autoTransposeRange.setValue(false)
-    return
-  }
-
-  const keyValue = keyRange.getValue()
-  const isKeyValid = keyValue && Chord.parse(keyValue)
-
-  if (!isKeyValid) {
-    autoTransposeRange.setValue(false)
-  }
+  const key = Chord.parse(SPREADSHEET().getRangeByName(KEY_RANGE_NAME)?.getValue() ?? "")
+  if (!key) autoTransposeRange.setValue(false)
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // ACTIONS
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-export function transposeUp(): void { transposeChords(1, true) }
+export function transposeUp(): void { transposeAllChords(1) }
 
-export function transposeDown(): void { transposeChords(-1, true) }
+export function transposeDown(): void { transposeAllChords(-1) }
 
 function markAsInvalid(value: unknown): string {
   const str = String(value)
   return str.startsWith("!") ? str : "!" + str
 }
 
-function transposeChords(semitones: number, updateKey: boolean = true): void {
+
+function transposeAllChords(semitones: number, updateKey: boolean = true): void {
+  if (semitones === 0) return
+
   if (updateKey) {
     const keyRange = SPREADSHEET().getRangeByName(KEY_RANGE_NAME)
-    if (keyRange) {
-      const keyValue = keyRange.getValue() as string
-      if (keyValue && keyValue !== "") {
-        let transposedKey: string
-        const chord = Chord.parse(keyValue)
-        if (chord) {
-          try {
-            transposedKey = chord.transpose(semitones).toString()
-          } catch {
-            transposedKey = markAsInvalid(keyValue)
-          }
-        } else {
-          transposedKey = markAsInvalid(keyValue)
-        }
-        keyRange.setValue(transposedKey)
-      }
-    }
+    const key = keyRange && Chord.parse(keyRange.getValue())
+
+    keyRange?.setValue(key?.transpose(semitones) ?? markAsInvalid(keyRange.getValue()))
   }
 
-  const chordsSheet = CHORDS_SHEET()
-  const frozenRows = chordsSheet.getFrozenRows()
-  const frozenColumns = chordsSheet.getFrozenColumns()
-  const lastRow = chordsSheet.getDataRange().getLastRow()
-  const lastColumn = chordsSheet.getDataRange().getLastColumn()
+  const range = getWorkingArea(CHORDS_SHEET()).intersect(CHORDS_SHEET().getDataRange())
+  if (!range) return
 
-  if (lastRow <= frozenRows || lastColumn <= frozenColumns) return
-
-  const workingRows = lastRow - frozenRows
-  const workingColumns = lastColumn - frozenColumns
-
-  const workingRange = chordsSheet.getRange(
-    frozenRows + 1,
-    frozenColumns + 1,
-    workingRows,
-    workingColumns
-  )
-  const values = workingRange.getValues()
-
-  const transposedValues = values.map((row, rowIndex) => {
-    if (rowIndex % 2 === 1) return row
-
-    return row.map(cell => {
-      if (cell === "" || cell === null) return cell
-
-      const chord = Chord.parse(cell as string)
-      if (chord) {
-        try {
-          return chord.transpose(semitones).toString()
-        } catch {
-          return markAsInvalid(cell)
-        }
-      } else {
-        return markAsInvalid(cell)
-      }
-    })
+  const values = range.getValues()
+  values.forEach((row, rowIndex) => {
+    if (rowIndex % 2 === 1) return
+    values[rowIndex] = row.map(cell => Chord.parse(cell)?.transpose(semitones) ?? markAsInvalid(cell))
   })
-
-  workingRange.setValues(transposedValues)
+  range.setValues(values)
 }
+
 
 export function setupTriggers(): void {
   const triggers = ScriptApp.getProjectTriggers()
@@ -307,40 +218,34 @@ export function setupTriggers(): void {
 
     success("Trigger setup", "onChange trigger installed successfully")
   } catch (e) {
-    error("Trigger setup failed", (e as Error).message)
+    error("Trigger setup failed", e instanceof Error ? e.message : `${e}`)
   }
 }
 
 export function resetFormatting(): void {
   const printHeaderRange = SPREADSHEET().getRangeByName(PRINT_HEADER_RANGE_NAME)
   const printFooterRange = SPREADSHEET().getRangeByName(PRINT_FOOTER_RANGE_NAME)
-  const printHeaderWidth = printHeaderRange ? printHeaderRange.getNumColumns() : null
+  const printHeaderWidth = printHeaderRange?.getNumColumns()
 
-  for (const sheet of SPREADSHEET().getSheets()) {
-    const frozenColumnCount = sheet.getFrozenColumns()
-    const totalColumnCount = sheet.getMaxColumns()
+  SPREADSHEET().getSheets().forEach(sheet => {
+    const workingArea = getWorkingArea(sheet)
     const isPrintSheet = sheet.getName() === PRINT_SHEET_NAME
 
-    for (let columnIndex = 1; columnIndex <= totalColumnCount; columnIndex++) {
-      const cellRange = sheet.getRange(1, columnIndex, 1, 1)
-      if ((isPrintSheet && printHeaderRange && cellRange.overlapsWith(printHeaderRange)) ||
-        (isPrintSheet && printFooterRange && cellRange.overlapsWith(printFooterRange))) continue
+    for (let columnIndex = 1; columnIndex <= sheet.getMaxColumns(); columnIndex++) {
+      const cellRange = sheet.getRange(1, columnIndex)
+      if (isPrintSheet && (printHeaderRange?.overlapsWith(cellRange) || printFooterRange?.overlapsWith(cellRange))) continue
 
-      let columnWidth: number
-      let effectiveColumnIndex = columnIndex
+      const effectiveColumnIndex = isPrintSheet && printHeaderWidth
+        ? ((columnIndex - 1) % printHeaderWidth) + 1
+        : columnIndex
 
-      if (isPrintSheet && printHeaderWidth) {
-        effectiveColumnIndex = ((columnIndex - 1) % printHeaderWidth) + 1
-      }
-
-      columnWidth =
-        effectiveColumnIndex <= frozenColumnCount
-          ? columnWidth = WIDE_COLUMN_WIDTH + 2 * PADDING
-          : effectiveColumnIndex === frozenColumnCount + 1
-            ? columnWidth = WIDE_COLUMN_WIDTH + PADDING
-            : (effectiveColumnIndex - (frozenColumnCount + 1)) % WIDE_COLUMN_PERIODICITY === 0
-              ? WIDE_COLUMN_WIDTH
-              : NORMAL_COLUMN_WIDTH
+      const columnWidth = effectiveColumnIndex < workingArea.getColumn()
+        ? WIDE_COLUMN_WIDTH + 2 * PADDING
+        : effectiveColumnIndex === workingArea.getColumn()
+          ? WIDE_COLUMN_WIDTH + PADDING
+          : (effectiveColumnIndex - workingArea.getColumn()) % WIDE_COLUMN_PERIODICITY === 0
+            ? WIDE_COLUMN_WIDTH
+            : NORMAL_COLUMN_WIDTH
 
       sheet.setColumnWidth(columnIndex, columnWidth)
     }
@@ -353,25 +258,24 @@ export function resetFormatting(): void {
       sheet.setRowHeights(1, maxRow, ROW_HEIGHT)
     }
 
-    const dataRange = sheet.getDataRange()
-    if (printHeaderRange && isPrintSheet) {
+    if (isPrintSheet && printHeaderRange) {
       const headerRow = printHeaderRange.getRow()
       const headerLastRow = printHeaderRange.getLastRow()
-      const footerRow = printFooterRange ? printFooterRange.getRow() : sheet.getMaxRows() + 1
+      const footerRow = printFooterRange?.getRow() ?? sheet.getMaxRows() + 1
 
       if (headerRow > 1) {
-        sheet.getRange(1, 1, headerRow - 1, sheet.getMaxColumns())
+        sheet.fullRange().resizeTo(undefined, headerRow - 1)
           .setFontFamily(FONT_FAMILY).setFontSize(FONT_SIZE)
       }
 
       if (headerLastRow < footerRow - 1) {
-        sheet.getRange(headerLastRow + 1, 1, footerRow - headerLastRow - 1, sheet.getMaxColumns())
+        sheet.fullRange().resizeTo(undefined, footerRow - headerLastRow - 1).translateTo(undefined, headerLastRow + 1)
           .setFontFamily(FONT_FAMILY).setFontSize(FONT_SIZE)
       }
     } else {
-      dataRange.setFontFamily(FONT_FAMILY).setFontSize(FONT_SIZE)
+      sheet.getDataRange().setFontFamily(FONT_FAMILY).setFontSize(FONT_SIZE)
     }
-  }
+  })
 
   success("Format reset", "Done")
 }
@@ -404,12 +308,12 @@ function getWorkingArea(sheet: Sheet): Range {
     .translate(frozenColumns, frozenRows)
 }
 
+
 function updateDocumentTitle(): void {
   const titleRange = SPREADSHEET().getRangeByName(DOCUMENT_TITLE_RANGE_NAME)
-  if (titleRange) {
-    titleRange.setValue(SPREADSHEET().getName())
-  }
+  titleRange?.setValue(SPREADSHEET().getName())
 }
+
 
 const toast = (icon: string) => (title = "", message = "") => {
   SPREADSHEET().toast(message, icon + " " + title, 10)
