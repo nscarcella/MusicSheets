@@ -6,6 +6,8 @@ declare global {
   namespace GoogleAppsScript.Spreadsheet {
     interface Sheet {
       fullRange(): Range
+      frozenRowsRange(): Range | undefined
+      frozenColumnsRange(): Range | undefined
     }
 
     interface Range {
@@ -31,6 +33,18 @@ declare global {
 
   SheetPrototype.fullRange = function (this: Sheet): Range {
     return this.getRange(1, 1, this.getMaxRows(), this.getMaxColumns())
+  }
+
+  SheetPrototype.frozenRowsRange = function (this: Sheet): Range | undefined {
+    const numFrozenRows = this.getFrozenRows()
+    if (numFrozenRows === 0) return undefined
+    return this.getRange(1, 1, numFrozenRows, this.getMaxColumns())
+  }
+
+  SheetPrototype.frozenColumnsRange = function (this: Sheet): Range | undefined {
+    const numFrozenColumns = this.getFrozenColumns()
+    if (numFrozenColumns === 0) return undefined
+    return this.getRange(1, 1, this.getMaxRows(), numFrozenColumns)
   }
 })();
 

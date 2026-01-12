@@ -1,3 +1,7 @@
+// TODO:
+// - Copy boldness of lyrics when syncing to chords sheet
+// - syncFROM is pulling tray text
+
 import { Chord } from "./Chords"
 import "./Range"
 
@@ -18,6 +22,7 @@ const PRINT_FOOTER_RANGE_NAME = "Pie_de_Página"
 const DOCUMENT_TITLE_RANGE_NAME = "Título"
 const KEY_RANGE_NAME = "Tonalidad"
 const AUTOTRANSPOSE_RANGE_NAME = "Auto_Trasponer"
+const CHORDS_HEADER_RANGE_NAME = "Encabezado_Acordes"
 
 const FONT_FAMILY = "Space Mono"
 const FONT_SIZE = 10
@@ -29,7 +34,7 @@ const WIDE_COLUMN_PERIODICITY = 6
 const PADDING = 3
 
 
-const STRUCTURAL_CHANGES = ["INSERT_ROW", "INSERT_COLUMN", "REMOVE_ROW", "REMOVE_COLUMN", "OTHER"]
+const TRIGGERS_INSTALLED_PROPERTY = "triggers_installed"
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // HOOKS
@@ -38,6 +43,7 @@ const STRUCTURAL_CHANGES = ["INSERT_ROW", "INSERT_COLUMN", "REMOVE_ROW", "REMOVE
 export function onOpen(): void {
   try {
     updateDocumentTitle()
+    createMissingTriggerWarning()
   } catch (error) {
     warn("Unexpected error in onOpen hook", error instanceof Error ? error.message : undefined)
   }
@@ -46,8 +52,9 @@ export function onOpen(): void {
 export function onEdit(event: OnEdit): void {
   try {
     const editedRange = event.range
+    const editedSheet = editedRange.getSheet()
 
-    switch (editedRange.getSheet().getName()) {
+    switch (editedSheet.getName()) {
       case LYRICS_SHEET_NAME:
         syncLyricsToChordSheet(editedRange)
         break
@@ -65,11 +72,20 @@ export function onEdit(event: OnEdit): void {
 
 export function onChange(event: OnChange): void {
   try {
-    if (STRUCTURAL_CHANGES.includes(event.changeType)) {
-      const sourceSheet = LYRICS_SHEET()
-      const effectiveRange = getWorkingArea(sourceSheet).resizeTo(undefined, sourceSheet.getDataRange().getNumRows())
+    if (event.changeType === "INSERT_COLUMN" || event.changeType === "REMOVE_COLUMN") {
+      const lyricsSheet = LYRICS_SHEET()
+      const trayWidth = SPREADSHEET().getRangeByName(LYRICS_RIGHT_TRAY_RANGE_NAME)?.getNumColumns() ?? 0
+      const workingAreaStart = lyricsSheet.getFrozenColumns() + 1
+      const workingAreaEnd = lyricsSheet.getMaxColumns() - trayWidth
 
-      syncLyricsToChordSheet(effectiveRange)
+      syncStructuralColumnChanges(detectChanges(popColumnIndexes(), workingAreaStart, workingAreaEnd))
+    }
+    else if (event.changeType === "INSERT_ROW" || event.changeType === "REMOVE_ROW") {
+      const lyricsSheet = LYRICS_SHEET()
+      const workingAreaStart = lyricsSheet.getFrozenRows() + 1
+      const workingAreaEnd = lyricsSheet.getMaxRows()
+
+      syncStructuralRowChanges(detectChanges(popRowIndexes(), workingAreaStart, workingAreaEnd))
     }
   } catch (error) {
     warn("Unexpected error in onChange hook", error instanceof Error ? error.message : undefined)
@@ -130,12 +146,17 @@ function syncLyricsFromChordSheet(range: Range): void {
       sourceWorkingArea.getColumn() - targetWorkingArea.getColumn(),
       sourceWorkingArea.getRow() - targetWorkingArea.getRow() - Math.ceil((targetRange.getRow() - targetWorkingArea.getRow()) / 2)
     )
+    .intersect(sourceWorkingArea)
+
+  if (!sourceRange) return
 
   const targetValues = targetRange.getValues()
   sourceRange.getValues().forEach((sourceRow, rowOffset) => {
     targetValues[rowOffset * 2] = sourceRow
   })
-  targetRange.setValues(targetValues)
+  targetRange.resizeTo(sourceRange.getNumColumns(), targetRange.getNumRows()).setValues(
+    targetValues.map(row => row.slice(0, sourceRange.getNumColumns()))
+  )
 }
 
 function handleKeyChange(range: Range, oldValue: string | undefined): void {
@@ -197,32 +218,6 @@ function transposeAll(semitones: number, updateKey: boolean = true): void {
   range.setValues(values)
 }
 
-
-export function setupTriggers(): void {
-  const triggers = ScriptApp.getProjectTriggers()
-
-  const existingOnChange = triggers.find(trigger =>
-    trigger.getHandlerFunction() === "onChange" &&
-    trigger.getEventType() === ScriptApp.EventType.ON_CHANGE
-  )
-
-  if (existingOnChange) {
-    info("Trigger setup", "onChange trigger already installed")
-    return
-  }
-
-  try {
-    ScriptApp.newTrigger("onChange")
-      .forSpreadsheet(SPREADSHEET())
-      .onChange()
-      .create()
-
-    success("Trigger setup", "onChange trigger installed successfully")
-  } catch (e) {
-    error("Trigger setup failed", e instanceof Error ? e.message : `${e}`)
-  }
-}
-
 export function resetFormatting(): void {
   const printHeaderRange = SPREADSHEET().getRangeByName(PRINT_HEADER_RANGE_NAME)
   const printFooterRange = SPREADSHEET().getRangeByName(PRINT_FOOTER_RANGE_NAME)
@@ -277,6 +272,209 @@ export function resetFormatting(): void {
       sheet.getDataRange().setFontFamily(FONT_FAMILY).setFontSize(FONT_SIZE)
     }
   })
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// TRIGGER SETUP
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+function createMissingTriggerWarning(): void {
+  if (PropertiesService.getDocumentProperties().getProperty(TRIGGERS_INSTALLED_PROPERTY)) return
+
+  SpreadsheetApp.getUi()
+    .createMenu("⚠️")
+    .addItem("Autorizar la extensión para habilitar la sincronización de texto avanzada", setupTriggers.name)
+    .addToUi()
+}
+
+function setupTriggers(): void {
+  if (
+    ScriptApp.getProjectTriggers().some(trigger =>
+      trigger.getHandlerFunction() === onChange.name && trigger.getEventType() === ScriptApp.EventType.ON_CHANGE
+    )
+  ) return info("Trigger setup", `${onChange.name} trigger already installed`)
+
+  try {
+    ScriptApp.newTrigger(onChange.name)
+      .forSpreadsheet(SPREADSHEET())
+      .onChange()
+      .create()
+
+    PropertiesService.getDocumentProperties().setProperty(TRIGGERS_INSTALLED_PROPERTY, "true")
+
+    success("Trigger setup", `${onChange.name} trigger installed successfully`)
+  } catch (e) {
+    error("Trigger setup failed", e instanceof Error ? e.message : `${e}`)
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// STRUCTURAL SYNC
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+export type StructuralChange = {
+  type: "insertion" | "deletion"
+  position: number
+  span: number
+}
+
+export function popColumnIndexes(): (number | null)[] {
+  const sheet = LYRICS_SHEET()
+  const indexRange = sheet.getRange(1, 1, 1, sheet.getMaxColumns())
+
+  const currentValues = indexRange.getValues()[0]
+  indexRange.setValues([currentValues.map((_, i) => i + 1)])
+
+  return currentValues.map(v => typeof v === "number" && v > 0 ? v : null)
+}
+
+export function popRowIndexes(): (number | null)[] {
+  const sheet = LYRICS_SHEET()
+  const indexRange = sheet.getRange(1, 1, sheet.getMaxRows(), 1)
+
+  const currentValues = indexRange.getValues()
+  indexRange.setValues(currentValues.map((_, i) => [i + 1]))
+
+  return currentValues.map(([v]) => typeof v === "number" && v > 0 ? v : null)
+}
+
+export function detectChanges(indexes: (number | null)[], workingAreaStart: number, workingAreaEnd: number): StructuralChange[] {
+  const changes: StructuralChange[] = []
+
+  for (let i = indexes.length - 1; i >= 0; i--) {
+    const current = indexes[i]
+    const previous = indexes[i - 1]
+
+    if (current === null) {
+      const afterNulls = i
+      let span = 1
+      while (i > 0 && indexes[i - 1] === null) {
+        span++
+        i--
+      }
+      const firstAfterNulls = indexes[afterNulls + 1]
+      const position = i > 0
+        ? indexes[i - 1]! + 1
+        : firstAfterNulls ?? 1
+
+      if (position >= workingAreaStart && position <= workingAreaEnd + span) {
+        const clampedStart = Math.max(position, workingAreaStart)
+        const clampedEnd = Math.min(position + span - 1, workingAreaEnd + span - 1)
+        const clampedSpan = clampedEnd - clampedStart + 1
+        if (clampedSpan > 0) {
+          changes.push({ type: "insertion", position: clampedStart - workingAreaStart + 1, span: clampedSpan })
+        }
+      }
+    } else {
+      const expected = i > 0 ? (previous ?? current) + 1 : 1
+      const gap = current - expected
+      if (gap > 0 && expected <= workingAreaEnd && expected + gap > workingAreaStart) {
+        const clampedStart = Math.max(expected, workingAreaStart)
+        const clampedEnd = Math.min(expected + gap - 1, workingAreaEnd)
+        const clampedSpan = clampedEnd - clampedStart + 1
+        if (clampedSpan > 0) {
+          changes.push({ type: "deletion", position: clampedStart - workingAreaStart + 1, span: clampedSpan })
+        }
+      }
+    }
+  }
+
+  return changes
+}
+
+export function applyStructuralColumnChanges(values: unknown[][], changes: StructuralChange[]): unknown[][] {
+  const result = values.map(row => [...row])
+
+  for (const change of changes) {
+    const index = change.position - 1
+    if (change.type === "insertion") {
+      result.forEach(row => row.splice(index, 0, ...Array(change.span).fill("")))
+    } else {
+      result.forEach(row => row.splice(index, change.span))
+    }
+  }
+
+  return result
+}
+
+export function applyStructuralRowChanges(values: unknown[][], changes: StructuralChange[]): unknown[][] {
+  const result = values.map(row => [...row])
+  if (result.length === 0) return result
+
+  const rowWidth = result[0].length
+
+  for (const change of changes) {
+    const index = (change.position - 1) * 2
+    const span = change.span * 2
+    if (change.type === "insertion") {
+      const emptyRows = Array.from({ length: span }, () => Array(rowWidth).fill(""))
+      result.splice(index, 0, ...emptyRows)
+    } else {
+      result.splice(index, span)
+    }
+  }
+
+  return result
+}
+
+function syncStructuralColumnChanges(changes: StructuralChange[]): void {
+  if (!changes.length) return
+
+  const chordsSheet = CHORDS_SHEET()
+  const workingArea = getWorkingArea(chordsSheet)
+
+  const newValues = applyStructuralColumnChanges(workingArea.getValues(), changes)
+  const newWidth = newValues[0]?.length ?? 0
+
+  if (newWidth > 0) {
+    chordsSheet
+      .getRange(workingArea.getRow(), workingArea.getColumn(), newValues.length, newWidth)
+      .setValues(newValues)
+  }
+
+  const frozenColumns = workingArea.getColumn() - 1
+  const headerWidth = SPREADSHEET().getRangeByName(CHORDS_HEADER_RANGE_NAME)?.getNumColumns() ?? frozenColumns
+  const targetMaxColumns = Math.max(frozenColumns + newWidth, headerWidth)
+  const currentMaxColumns = chordsSheet.getMaxColumns()
+
+  if (currentMaxColumns > targetMaxColumns) {
+    chordsSheet.deleteColumns(targetMaxColumns + 1, currentMaxColumns - targetMaxColumns)
+  }
+}
+
+function syncStructuralRowChanges(changes: StructuralChange[]): void {
+  if (!changes.length) return
+
+  const chordsSheet = CHORDS_SHEET()
+  const workingArea = getWorkingArea(chordsSheet)
+
+  const newValues = applyStructuralRowChanges(workingArea.getValues(), changes)
+  const newWidth = newValues[0]?.length ?? 0
+
+  const lyricsWorkingArea = getWorkingArea(LYRICS_SHEET())
+  const lyricsContentHeight = findLastRowWithContent(lyricsWorkingArea.getValues())
+  const targetContentHeight = lyricsContentHeight * 2
+
+  if (targetContentHeight > 0 && newWidth > 0) {
+    chordsSheet
+      .getRange(workingArea.getRow(), workingArea.getColumn(), targetContentHeight, newWidth)
+      .setValues(newValues.slice(0, targetContentHeight))
+  }
+
+  const frozenRows = workingArea.getRow() - 1
+  const targetMaxRows = frozenRows + targetContentHeight
+  const currentMaxRows = chordsSheet.getMaxRows()
+
+  if (currentMaxRows > targetMaxRows) {
+    chordsSheet.deleteRows(targetMaxRows + 1, currentMaxRows - targetMaxRows)
+  }
+}
+
+function findLastRowWithContent(values: unknown[][]): number {
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (values[i].some(cell => cell !== "")) return i + 1
+  }
+  return 0
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
