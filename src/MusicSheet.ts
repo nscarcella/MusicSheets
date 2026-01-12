@@ -1,7 +1,3 @@
-// TODO:
-// - Copy boldness of lyrics when syncing to chords sheet
-// - syncFROM is pulling tray text
-
 import { Chord } from "./Chords"
 import "./Range"
 
@@ -117,11 +113,20 @@ function syncLyricsToChordSheet(range: Range): void {
       targetWorkingArea.getRow() - sourceWorkingArea.getRow() + (sourceRange.getRow() - sourceWorkingArea.getRow())
     )
 
-  const targetValues = targetRange.getValues()
-  sourceRange.getValues().forEach((sourceRow, rowOffset) => {
-    targetValues[rowOffset * 2 + 1] = sourceRow
+  const blackText = SpreadsheetApp.newTextStyle().setForegroundColor("#000000").build()
+
+  const sourceRichText = sourceRange.getRichTextValues()
+  const targetRichText = targetRange.getRichTextValues()
+
+  const emptyRichText = SpreadsheetApp.newRichTextValue().setText("").build()
+
+  sourceRichText.forEach((sourceRow, rowOffset) => {
+    targetRichText[rowOffset * 2 + 1] = sourceRow.map(rt =>
+      rt?.getText() ? rt.copy().setTextStyle(0, rt.getText().length, blackText).build() : emptyRichText
+    )
   })
-  targetRange.setValues(targetValues)
+
+  targetRange.setRichTextValues(targetRichText.map(row => row.map(rt => rt ?? emptyRichText)))
 }
 
 
@@ -153,13 +158,22 @@ function syncLyricsFromChordSheet(range: Range): void {
 
   if (!sourceRange) return
 
-  const targetValues = targetRange.getValues()
-  sourceRange.getValues().forEach((sourceRow, rowOffset) => {
-    targetValues[rowOffset * 2] = sourceRow
+  const blackText = SpreadsheetApp.newTextStyle().setForegroundColor("#000000").build()
+
+  const sourceRichText = sourceRange.getRichTextValues()
+  const targetRichText = targetRange.getRichTextValues()
+
+  const emptyRichText = SpreadsheetApp.newRichTextValue().setText("").build()
+
+  sourceRichText.forEach((sourceRow, rowOffset) => {
+    targetRichText[rowOffset * 2] = sourceRow.map(rt =>
+      rt?.getText() ? rt.copy().setTextStyle(0, rt.getText().length, blackText).build() : emptyRichText
+    )
   })
-  targetRange.resizeTo(sourceRange.getNumColumns(), targetRange.getNumRows()).setValues(
-    targetValues.map(row => row.slice(0, sourceRange.getNumColumns()))
-  )
+
+  targetRange
+    .resizeTo(sourceRange.getNumColumns(), targetRange.getNumRows())
+    .setRichTextValues(targetRichText.map(row => row.slice(0, sourceRange.getNumColumns()).map(rt => rt ?? emptyRichText)))
 }
 
 function handleKeyChange(range: Range, oldValue: string | undefined): void {

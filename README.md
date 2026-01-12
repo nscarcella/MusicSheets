@@ -232,14 +232,33 @@ range.intersect(otherRange)  // Returns Range | undefined
 range.projectInto(targetSheet)  // Same position on different sheet
 ```
 
+### Working Area
+
+The "working area" is the editable content region of each sheet, excluding:
+- **Frozen rows/columns** (headers, row labels)
+- **Right tray** (only in Lyrics sheet - the `Ideas_Sueltas` named range for notes)
+
+All sync operations only affect content within working areas.
+
 ### Sync Algorithm
 
-The lyrics synchronization uses a sophisticated mapping algorithm:
+The Chords sheet has **2x the rows** of the Lyrics sheet. Each lyrics row becomes two rows:
+- **Even indices (0, 2, 4...)** → Chord rows (where you write chords)
+- **Odd indices (1, 3, 5...)** → Lyric rows (mirrored from Lyrics sheet)
 
-1. **Lyrics → Chords**: Each lyrics row maps to every other row (odd rows) in the chords sheet with 2:1 scaling
-2. **Chords → Lyrics**: Edits to even rows in chords sheet sync back to lyrics sheet with 0.5:1 scaling
-3. **Working Area Isolation**: Only syncs content within the working area (excludes frozen rows/columns and right tray)
-4. **Offset Preservation**: Maintains relative positioning when source range is subset of working area
+```
+Lyrics Sheet:        Chords Sheet:
+┌─────────────┐      ┌─────────────┐
+│ Row 0: "Hello" │ →  │ Row 0: [chords]  │
+│             │      │ Row 1: "Hello"   │
+│ Row 1: "World" │ →  │ Row 2: [chords]  │
+│             │      │ Row 3: "World"   │
+└─────────────┘      └─────────────┘
+```
+
+**Sync directions:**
+- **Lyrics → Chords** (`syncLyricsToChordSheet`): Copies lyrics to odd rows in Chords sheet
+- **Chords → Lyrics** (`syncLyricsFromChordSheet`): If you edit a lyric row in Chords sheet, it syncs back
 
 ### Type Safety
 
