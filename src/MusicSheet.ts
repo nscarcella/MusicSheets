@@ -57,6 +57,7 @@ export function onEdit(event: OnEdit): void {
     switch (editedSheet.getName()) {
       case LYRICS_SHEET_NAME:
         syncLyricsToChordSheet(editedRange)
+        enforceChordHeight()
         break
 
       case CHORDS_SHEET_NAME:
@@ -75,17 +76,19 @@ export function onChange(event: OnChange): void {
     if (event.changeType === "INSERT_COLUMN" || event.changeType === "REMOVE_COLUMN") {
       const lyricsSheet = LYRICS_SHEET()
       const trayWidth = SPREADSHEET().getRangeByName(LYRICS_RIGHT_TRAY_RANGE_NAME)?.getNumColumns() ?? 0
-      const workingAreaStart = lyricsSheet.getFrozenColumns() + 1
-      const workingAreaEnd = lyricsSheet.getMaxColumns() - trayWidth
+      const rangeStart = lyricsSheet.getFrozenColumns() + 1
+      const rangeEnd = lyricsSheet.getMaxColumns() - trayWidth
 
-      syncStructuralColumnChanges(detectChanges(popColumnIndexes(), workingAreaStart, workingAreaEnd))
+      syncStructuralColumnChanges(detectChanges(popColumnIndexes(), rangeStart, rangeEnd))
+      enforceChordWidth()
     }
     else if (event.changeType === "INSERT_ROW" || event.changeType === "REMOVE_ROW") {
       const lyricsSheet = LYRICS_SHEET()
-      const workingAreaStart = lyricsSheet.getFrozenRows() + 1
-      const workingAreaEnd = lyricsSheet.getMaxRows()
+      const rangeStart = lyricsSheet.getFrozenRows() + 1
+      const rangeEnd = lyricsSheet.getMaxRows()
 
-      syncStructuralRowChanges(detectChanges(popRowIndexes(), workingAreaStart, workingAreaEnd))
+      syncStructuralRowChanges(detectChanges(popRowIndexes(), rangeStart, rangeEnd))
+      enforceChordHeight()
     }
   } catch (error) {
     warn("Unexpected error in onChange hook", error instanceof Error ? error.message : undefined)
@@ -420,21 +423,42 @@ export function applyStructuralRowChanges(values: unknown[][], changes: Structur
 function syncStructuralColumnChanges(changes: StructuralChange[]): void {
   if (!changes.length) return
 
-  const chordsSheet = CHORDS_SHEET()
-  const workingArea = getWorkingArea(chordsSheet)
+  const workingArea = getWorkingArea(CHORDS_SHEET())
 
   const newValues = applyStructuralColumnChanges(workingArea.getValues(), changes)
   const newWidth = newValues[0]?.length ?? 0
 
   if (newWidth > 0) {
-    chordsSheet
-      .getRange(workingArea.getRow(), workingArea.getColumn(), newValues.length, newWidth)
+    workingArea.resizeTo(newWidth, newValues.length)
       .setValues(newValues)
   }
+}
 
-  const frozenColumns = workingArea.getColumn() - 1
+function syncStructuralRowChanges(changes: StructuralChange[]): void {
+  if (!changes.length) return
+
+  const workingArea = getWorkingArea(CHORDS_SHEET())
+
+  const newValues = applyStructuralRowChanges(workingArea.getValues(), changes)
+  const newWidth = newValues[0]?.length ?? 0
+
+  const lyricsContentHeight = findLastRowWithContent(getWorkingArea(LYRICS_SHEET()).getValues())
+  const targetContentHeight = lyricsContentHeight * 2
+
+  if (targetContentHeight > 0 && newWidth > 0) {
+    workingArea
+      .resizeTo(newWidth, targetContentHeight)
+      .setValues(newValues.slice(0, targetContentHeight))
+  }
+}
+
+function enforceChordWidth(): void {
+  const chordsSheet = CHORDS_SHEET()
+  const lyricsWorkingAreaWidth = getWorkingArea(LYRICS_SHEET()).getNumColumns()
+
+  const frozenColumns = chordsSheet.getFrozenColumns()
   const headerWidth = SPREADSHEET().getRangeByName(CHORDS_HEADER_RANGE_NAME)?.getNumColumns() ?? frozenColumns
-  const targetMaxColumns = Math.max(frozenColumns + newWidth, headerWidth)
+  const targetMaxColumns = Math.max(frozenColumns + lyricsWorkingAreaWidth, headerWidth)
   const currentMaxColumns = chordsSheet.getMaxColumns()
 
   if (currentMaxColumns > targetMaxColumns) {
@@ -442,39 +466,16 @@ function syncStructuralColumnChanges(changes: StructuralChange[]): void {
   }
 }
 
-function syncStructuralRowChanges(changes: StructuralChange[]): void {
-  if (!changes.length) return
-
+function enforceChordHeight(): void {
   const chordsSheet = CHORDS_SHEET()
-  const workingArea = getWorkingArea(chordsSheet)
+  const contentHeight = findLastRowWithContent(getWorkingArea(LYRICS_SHEET()).getValues())
 
-  const newValues = applyStructuralRowChanges(workingArea.getValues(), changes)
-  const newWidth = newValues[0]?.length ?? 0
-
-  const lyricsWorkingArea = getWorkingArea(LYRICS_SHEET())
-  const lyricsContentHeight = findLastRowWithContent(lyricsWorkingArea.getValues())
-  const targetContentHeight = lyricsContentHeight * 2
-
-  if (targetContentHeight > 0 && newWidth > 0) {
-    chordsSheet
-      .getRange(workingArea.getRow(), workingArea.getColumn(), targetContentHeight, newWidth)
-      .setValues(newValues.slice(0, targetContentHeight))
-  }
-
-  const frozenRows = workingArea.getRow() - 1
-  const targetMaxRows = frozenRows + targetContentHeight
+  const targetMaxRows = chordsSheet.getFrozenRows() + Math.max(contentHeight * 2, 1)
   const currentMaxRows = chordsSheet.getMaxRows()
 
   if (currentMaxRows > targetMaxRows) {
     chordsSheet.deleteRows(targetMaxRows + 1, currentMaxRows - targetMaxRows)
   }
-}
-
-function findLastRowWithContent(values: unknown[][]): number {
-  for (let i = values.length - 1; i >= 0; i--) {
-    if (values[i].some(cell => cell !== "")) return i + 1
-  }
-  return 0
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -505,6 +506,12 @@ function getWorkingArea(sheet: Sheet): Range {
     .translate(frozenColumns, frozenRows)
 }
 
+function findLastRowWithContent(values: unknown[][]): number {
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (values[i].some(cell => cell !== "")) return i + 1
+  }
+  return 0
+}
 
 function updateDocumentTitle(): void {
   const titleRange = SPREADSHEET().getRangeByName(DOCUMENT_TITLE_RANGE_NAME)
