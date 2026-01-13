@@ -327,6 +327,33 @@ describe("calculateLayout", () => {
     expect(result[1][0]).toEqual([s2])
   })
 
+  it("should have more space on second page (no header)", () => {
+    // First page: 50 - 5 = 45 rows available
+    // Second page: 50 rows available (no header)
+    // s1 takes full first page width, height 45 (fits exactly on first page)
+    // s2 is 48 rows - too tall for first page (45) but fits on second page (50)
+    const s1 = mockSection(45, 45)
+    const s2 = mockSection(10, 48)
+    const result = calculateLayout([s1, s2], 45, 50, 5)
+    expect(result).toHaveLength(2)
+    expect(result[0][0]).toEqual([s1])
+    expect(result[1][0]).toEqual([s2])
+  })
+
+  it("should stack more sections on second page due to extra height", () => {
+    // First page: 45 rows available (50 - 5 header)
+    // Second page: 50 rows available
+    // s1 (45 rows) fills first page
+    // s2 + s3 (24 + 24 = 48 rows) should fit on second page but not on first
+    const s1 = mockSection(45, 45)
+    const s2 = mockSection(10, 24)
+    const s3 = mockSection(10, 24)
+    const result = calculateLayout([s1, s2, s3], 45, 50, 5)
+    expect(result).toHaveLength(2)
+    expect(result[0][0]).toEqual([s1])
+    expect(result[1][0]).toEqual([s2, s3])
+  })
+
   it("should fill columns before starting new page", () => {
     const s1 = mockSection(15, 30)
     const s2 = mockSection(15, 30)

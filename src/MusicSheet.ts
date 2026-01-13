@@ -604,6 +604,7 @@ export function regeneratePrint(): void {
   for (let pageIndex = 0; pageIndex < layout.length; pageIndex++) {
     const page = layout[pageIndex]
     const pageColumnOffset = pageIndex * PRINT_PAGE_WIDTH
+    const pageContentStartRow = pageIndex === 0 ? contentStartRow : 1
 
     let columnOffset = 0
     for (let colIndex = 0; colIndex < page.length; colIndex++) {
@@ -617,7 +618,7 @@ export function regeneratePrint(): void {
           row.map(rt => rt ?? emptyRichText)
         )
         const targetRange = printSheet.getRange(
-          contentStartRow + rowOffset,
+          pageContentStartRow + rowOffset,
           pageColumnOffset + columnOffset + 1,
           section.getNumRows(),
           section.getNumColumns()
@@ -648,7 +649,8 @@ export function calculateLayout(
   let currentColumnHeight = 0
   let currentRowWidth = 0
 
-  const availableHeight = pageHeight - firstPageHeaderHeight
+  const getAvailableHeight = () =>
+    pages.length === 0 ? pageHeight - firstPageHeaderHeight : pageHeight
 
   for (const section of sections) {
     const sectionWidth = section.getNumColumns()
@@ -657,7 +659,7 @@ export function calculateLayout(
     const vPadding = currentPage.length > 0 && currentPage[currentPage.length - 1].length > 0 ? verticalPadding : 0
     const hPadding = currentPage.length > 0 ? horizontalPadding : 0
 
-    if (currentColumnHeight + vPadding + sectionHeight <= availableHeight) {
+    if (currentColumnHeight + vPadding + sectionHeight <= getAvailableHeight()) {
       if (currentPage.length === 0) {
         currentPage.push([])
         currentColumnWidth = sectionWidth
