@@ -8,17 +8,19 @@ type OnEdit = GoogleAppsScript.Events.SheetsOnEdit
 type OnChange = GoogleAppsScript.Events.SheetsOnChange
 
 
+const VERSION = "2.1"
+
 const LYRICS_SHEET_NAME = "Letra"
 const CHORDS_SHEET_NAME = "Acordes"
 const PRINT_SHEET_NAME = "Impresión"
 
 const LYRICS_RIGHT_TRAY_RANGE_NAME = "Ideas_Sueltas"
-const PRINT_HEADER_RANGE_NAME = "Encabezado"
-const PRINT_FOOTER_RANGE_NAME = "Pie_de_Página"
-const DOCUMENT_TITLE_RANGE_NAME = "Título"
 const KEY_RANGE_NAME = "Tonalidad"
 const AUTOTRANSPOSE_RANGE_NAME = "Auto_Trasponer"
 const CHORDS_HEADER_RANGE_NAME = "Encabezado_Acordes"
+const AUTHOR_RANGE_NAME = "Autor"
+const TEMPO_RANGE_NAME = "Tempo"
+const NOTES_RANGE_NAME = "Notas"
 
 const FONT_FAMILY = "Space Mono"
 const FONT_SIZE = 10
@@ -32,8 +34,8 @@ const PADDING = 3
 
 const TRIGGERS_INSTALLED_PROPERTY = "triggers_installed"
 
-const PRINT_PAGE_WIDTH = 45
-const PRINT_PAGE_HEIGHT = 51
+const PRINT_PAGE_WIDTH = 46
+const PRINT_PAGE_HEIGHT = 52
 const PRINT_HEADER_HEIGHT = 5
 const PRINT_FOOTER_HEIGHT = 1
 const PRINT_HORIZONTAL_PADDING = 2
@@ -45,7 +47,6 @@ const PRINT_VERTICAL_PADDING = 2
 
 export function onOpen(): void {
   try {
-    updateDocumentTitle()
     createMissingTriggerWarning()
     createPrintMenu()
   } catch (error) {
@@ -251,22 +252,13 @@ function transposeAll(semitones: number, updateKey: boolean = true): void {
 }
 
 export function resetFormatting(): void {
-  const printHeaderRange = SPREADSHEET().getRangeByName(PRINT_HEADER_RANGE_NAME)
-  const printFooterRange = SPREADSHEET().getRangeByName(PRINT_FOOTER_RANGE_NAME)
-  const printHeaderWidth = printHeaderRange?.getNumColumns()
 
   SPREADSHEET().getSheets().forEach(sheet => {
     const workingArea = getWorkingArea(sheet)
     const isPrintSheet = sheet.getName() === PRINT_SHEET_NAME
 
     for (let columnIndex = 1; columnIndex <= sheet.getMaxColumns(); columnIndex++) {
-      const cellRange = sheet.getRange(1, columnIndex)
-      if (isPrintSheet && (printHeaderRange?.overlapsWith(cellRange) || printFooterRange?.overlapsWith(cellRange))) continue
-
-      const effectiveColumnIndex = isPrintSheet && printHeaderWidth
-        ? ((columnIndex - 1) % printHeaderWidth) + 1
-        : columnIndex
-
+      const effectiveColumnIndex = columnIndex
       const columnWidth = effectiveColumnIndex < workingArea.getColumn()
         ? WIDE_COLUMN_WIDTH + 2 * PADDING
         : effectiveColumnIndex === workingArea.getColumn()
@@ -278,30 +270,15 @@ export function resetFormatting(): void {
       sheet.setColumnWidth(columnIndex, columnWidth)
     }
 
-    const maxRow = isPrintSheet && printFooterRange
-      ? printFooterRange.getRow() - 1
-      : sheet.getMaxRows()
 
-    if (maxRow >= 1) {
-      sheet.setRowHeights(1, maxRow, ROW_HEIGHT)
-    }
 
-    if (isPrintSheet && printHeaderRange) {
-      const headerRow = printHeaderRange.getRow()
-      const headerLastRow = printHeaderRange.getLastRow()
-      const footerRow = printFooterRange?.getRow() ?? sheet.getMaxRows() + 1
-
-      if (headerRow > 1) {
-        sheet.fullRange().resizeTo(undefined, headerRow - 1)
-          .setFontFamily(FONT_FAMILY).setFontSize(FONT_SIZE)
+    sheet.getDataRange().setFontFamily(FONT_FAMILY)
+    if (!isPrintSheet) {
+      const maxRow = sheet.getMaxRows()
+      if (maxRow >= 1) {
+        sheet.setRowHeights(1, maxRow, ROW_HEIGHT)
       }
-
-      if (headerLastRow < footerRow - 1) {
-        sheet.fullRange().resizeTo(undefined, footerRow - headerLastRow - 1).translateTo(undefined, headerLastRow + 1)
-          .setFontFamily(FONT_FAMILY).setFontSize(FONT_SIZE)
-      }
-    } else {
-      sheet.getDataRange().setFontFamily(FONT_FAMILY).setFontSize(FONT_SIZE)
+      sheet.getDataRange().setFontSize(FONT_SIZE)
     }
   })
 }
@@ -559,7 +536,7 @@ export type PageLayout = Range[][][]
 
 export function regeneratePrint(): void {
   const chordsSheet = CHORDS_SHEET()
-  const printSheet = PRINT_SHEET()
+  const spreadsheet = SPREADSHEET()
 
   const contentStartRow = PRINT_HEADER_HEIGHT + 1
   const maxContentHeight = PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT
@@ -586,17 +563,29 @@ export function regeneratePrint(): void {
   const totalPages = layout.length || 1
   const requiredColumns = totalPages * PRINT_PAGE_WIDTH
 
-  if (printSheet.getMaxColumns() < requiredColumns) {
-    printSheet.insertColumnsAfter(printSheet.getMaxColumns(), requiredColumns - printSheet.getMaxColumns())
-  } else if (printSheet.getMaxColumns() > requiredColumns) {
-    printSheet.deleteColumns(requiredColumns + 1, printSheet.getMaxColumns() - requiredColumns)
+  const existingPrintSheet = spreadsheet.getSheetByName(PRINT_SHEET_NAME)
+  if (existingPrintSheet) {
+    spreadsheet.deleteSheet(existingPrintSheet)
+  }
+  const printSheet = spreadsheet.insertSheet(PRINT_SHEET_NAME, spreadsheet.getNumSheets())
+
+  const currentRows = printSheet.getMaxRows()
+  const currentColumns = printSheet.getMaxColumns()
+
+  if (currentRows < PRINT_PAGE_HEIGHT) {
+    printSheet.insertRows(1, PRINT_PAGE_HEIGHT - currentRows)
+  } else if (currentRows > PRINT_PAGE_HEIGHT) {
+    printSheet.deleteRows(PRINT_PAGE_HEIGHT + 1, currentRows - PRINT_PAGE_HEIGHT)
   }
 
-  const contentArea = printSheet.getRange(contentStartRow, 1, maxContentHeight - PRINT_HEADER_HEIGHT, requiredColumns)
-  contentArea.clearContent()
+  if (currentColumns < requiredColumns) {
+    printSheet.insertColumns(1, requiredColumns - currentColumns)
+  } else if (currentColumns > requiredColumns) {
+    printSheet.deleteColumns(requiredColumns + 1, currentColumns - requiredColumns)
+  }
 
   for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
-    const pageRange = printSheet.getRange(1, pageIndex * PRINT_PAGE_WIDTH + 1, PRINT_PAGE_HEIGHT, PRINT_PAGE_WIDTH)
+    const pageRange = printSheet.getRange(1, pageIndex * PRINT_PAGE_WIDTH + 1, PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT, PRINT_PAGE_WIDTH)
     pageRange.setBorder(true, true, true, true, false, false)
   }
 
@@ -630,8 +619,64 @@ export function regeneratePrint(): void {
     }
   }
 
+  generatePrintHeader(printSheet)
+  for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
+    generatePrintFooter(printSheet, pageIndex, totalPages)
+  }
+
   resetFormatting()
   success("Impresión generada", `${totalPages} página(s)`)
+}
+
+function generatePrintHeader(printSheet: Sheet): void {
+  const author = String(SPREADSHEET().getRangeByName(AUTHOR_RANGE_NAME)?.getValue() ?? "")
+  const key = String(SPREADSHEET().getRangeByName(KEY_RANGE_NAME)?.getValue() ?? "")
+  const tempo = String(SPREADSHEET().getRangeByName(TEMPO_RANGE_NAME)?.getValue() ?? "")
+  const notes = String(SPREADSHEET().getRangeByName(NOTES_RANGE_NAME)?.getValue() ?? "")
+
+  const titleRange = printSheet.getRange(1, 1, 2, PRINT_PAGE_WIDTH)
+  titleRange.merge()
+  titleRange.setValue(SPREADSHEET().getName())
+  titleRange.setFontSize(14)
+  titleRange.setFontWeight("bold")
+  titleRange.setVerticalAlignment("bottom")
+
+  const authorRange = printSheet.getRange(3, 1, 1, PRINT_PAGE_WIDTH)
+  authorRange.merge()
+  authorRange.setValue(author)
+  authorRange.setFontSize(8)
+
+  const infoText = [key ? `[${key}]` : "", tempo ? `${tempo} bpm` : ""].filter(Boolean).join(" ")
+  const infoRange = printSheet.getRange(4, 1, 1, Math.floor(PRINT_PAGE_WIDTH / 2))
+  infoRange.merge()
+  infoRange.setValue(infoText)
+
+  const timestamp = `${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd")}:${VERSION}`
+  const timestampRange = printSheet.getRange(4, Math.floor(PRINT_PAGE_WIDTH / 2) + 1, 1, Math.ceil(PRINT_PAGE_WIDTH / 2))
+  timestampRange.merge()
+  timestampRange.setValue(timestamp)
+  timestampRange.setHorizontalAlignment("right")
+  timestampRange.setFontSize(8)
+
+  const notesRange = printSheet.getRange(5, 1, 1, PRINT_PAGE_WIDTH)
+  notesRange.merge()
+  notesRange.setValue(notes)
+  notesRange.setFontStyle("italic")
+  notesRange.setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
+
+  const headerRange = printSheet.getRange(1, 1, PRINT_HEADER_HEIGHT, PRINT_PAGE_WIDTH)
+  headerRange.setBorder(true, true, true, true, false, false)
+}
+
+function generatePrintFooter(printSheet: Sheet, pageIndex: number, totalPages: number): void {
+  const footerText = `${SPREADSHEET().getName()}  ${pageIndex + 1}/${totalPages}`
+
+  const footerRange = printSheet.getRange(PRINT_PAGE_HEIGHT, pageIndex * PRINT_PAGE_WIDTH + 1, 1, PRINT_PAGE_WIDTH)
+  footerRange.merge()
+  footerRange.setValue(footerText)
+  footerRange.setHorizontalAlignment("right")
+  footerRange.setFontSize(8)
+  printSheet.setRowHeight(PRINT_PAGE_HEIGHT, 13)
 }
 
 export function calculateLayout(
@@ -758,7 +803,6 @@ const getSheet = (sheetName: string) => (): Sheet => {
 
 const LYRICS_SHEET = getSheet(LYRICS_SHEET_NAME)
 const CHORDS_SHEET = getSheet(CHORDS_SHEET_NAME)
-const PRINT_SHEET = getSheet(PRINT_SHEET_NAME)
 
 
 function getWorkingArea(sheet: Sheet): Range {
@@ -779,12 +823,6 @@ function findLastRowWithContent(values: unknown[][]): number {
   }
   return 0
 }
-
-function updateDocumentTitle(): void {
-  const titleRange = SPREADSHEET().getRangeByName(DOCUMENT_TITLE_RANGE_NAME)
-  titleRange?.setValue(SPREADSHEET().getName())
-}
-
 
 const toast = (icon: string) => (title = "", message = "") => {
   SPREADSHEET().toast(message, icon + " " + title, 10)
