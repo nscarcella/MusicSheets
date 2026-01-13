@@ -410,4 +410,23 @@ describe("calculateLayout", () => {
     expect(result[0]).toHaveLength(1)
     expect(result[0][0]).toEqual([s1])
   })
+
+  it("should account for column width growth when checking if new column fits", () => {
+    // Column 1: s1 (10w, 40h) then s2 (15w, 4h) stacks → column width grows to 15
+    // Column 2: s3 (15w, 44h) alone (no room for s4)
+    // Column 3: s4 (15w) → should NOT fit because 15 + 2 + 15 + 2 + 15 = 49 > 45
+    // Bug: currentRowWidth only tracks completed columns, but check didn't include currentColumnWidth
+    const s1 = mockSection(10, 40)
+    const s2 = mockSection(15, 4)   // stacks, grows column 1 to 15w, total height 44
+    const s3 = mockSection(15, 44)  // starts column 2 (can't stack: 44+4=48>45)
+    const s4 = mockSection(15, 44)  // should NOT fit as column 3 (15+2+15+2+15=49>45)
+    const result = calculateLayout([s1, s2, s3, s4], 45, 50, 5, 2, 0)
+    // Expected: 2 pages (s4 doesn't fit on page 1)
+    // Bug: 1 page with 3 columns (if currentColumnWidth not included in check)
+    expect(result).toHaveLength(2)
+    expect(result[0]).toHaveLength(2)  // columns 1 and 2
+    expect(result[0][0]).toEqual([s1, s2])
+    expect(result[0][1]).toEqual([s3])
+    expect(result[1][0]).toEqual([s4])
+  })
 })

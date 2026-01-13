@@ -562,11 +562,10 @@ export function regeneratePrint(): void {
   const printSheet = PRINT_SHEET()
 
   const contentStartRow = PRINT_HEADER_HEIGHT + 1
-  const contentHeight = PRINT_PAGE_HEIGHT - PRINT_HEADER_HEIGHT - PRINT_FOOTER_HEIGHT
+  const maxContentHeight = PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT
 
   const sectionRanges = detectSectionRanges(getWorkingArea(chordsSheet))
 
-  const maxContentHeight = PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT
   const oversizedSection = sectionRanges.find(
     s => s.getNumRows() > maxContentHeight || s.getNumColumns() > PRINT_PAGE_WIDTH
   )
@@ -578,7 +577,7 @@ export function regeneratePrint(): void {
   const layout = calculateLayout(
     sectionRanges,
     PRINT_PAGE_WIDTH,
-    contentHeight,
+    maxContentHeight,
     PRINT_HEADER_HEIGHT,
     PRINT_HORIZONTAL_PADDING,
     PRINT_VERTICAL_PADDING
@@ -593,7 +592,7 @@ export function regeneratePrint(): void {
     printSheet.deleteColumns(requiredColumns + 1, printSheet.getMaxColumns() - requiredColumns)
   }
 
-  const contentArea = printSheet.getRange(contentStartRow, 1, contentHeight, requiredColumns)
+  const contentArea = printSheet.getRange(contentStartRow, 1, maxContentHeight - PRINT_HEADER_HEIGHT, requiredColumns)
   contentArea.clearContent()
 
   for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
@@ -663,12 +662,11 @@ export function calculateLayout(
       if (currentPage.length === 0) {
         currentPage.push([])
         currentColumnWidth = sectionWidth
-        currentRowWidth = sectionWidth
       }
       currentPage[currentPage.length - 1].push(section)
       currentColumnHeight += vPadding + sectionHeight
       currentColumnWidth = Math.max(currentColumnWidth, sectionWidth)
-    } else if (currentRowWidth + hPadding + sectionWidth <= pageWidth) {
+    } else if (currentRowWidth + currentColumnWidth + hPadding + sectionWidth <= pageWidth) {
       currentRowWidth += currentColumnWidth + hPadding
       currentPage.push([section])
       currentColumnWidth = sectionWidth
@@ -677,7 +675,7 @@ export function calculateLayout(
       pages.push(currentPage)
       currentPage = [[section]]
       currentColumnWidth = sectionWidth
-      currentRowWidth = sectionWidth
+      currentRowWidth = 0
       currentColumnHeight = sectionHeight
     }
   }
