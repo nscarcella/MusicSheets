@@ -596,10 +596,10 @@ export function regeneratePrint(): void {
   const contentArea = printSheet.getRange(contentStartRow, 1, contentHeight, requiredColumns)
   contentArea.clearContent()
 
-  // for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
-  //   const pageRange = printSheet.getRange(1, pageIndex * PRINT_PAGE_WIDTH + 1, PRINT_PAGE_HEIGHT, PRINT_PAGE_WIDTH)
-  //   pageRange.setBorder(true, true, true, true, false, false)
-  // }
+  for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
+    const pageRange = printSheet.getRange(1, pageIndex * PRINT_PAGE_WIDTH + 1, PRINT_PAGE_HEIGHT, PRINT_PAGE_WIDTH)
+    pageRange.setBorder(true, true, true, true, false, false)
+  }
 
   for (let pageIndex = 0; pageIndex < layout.length; pageIndex++) {
     const page = layout[pageIndex]
