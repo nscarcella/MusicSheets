@@ -32,6 +32,13 @@ const PADDING = 3
 
 const TRIGGERS_INSTALLED_PROPERTY = "triggers_installed"
 
+const PRINT_PAGE_WIDTH = 45
+const PRINT_PAGE_HEIGHT = 51
+const PRINT_HEADER_HEIGHT = 5
+const PRINT_FOOTER_HEIGHT = 1
+const PRINT_HORIZONTAL_PADDING = 2
+const PRINT_VERTICAL_PADDING = 2
+
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // HOOKS
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -40,9 +47,17 @@ export function onOpen(): void {
   try {
     updateDocumentTitle()
     createMissingTriggerWarning()
+    createPrintMenu()
   } catch (error) {
     warn("Unexpected error in onOpen hook", error instanceof Error ? error.message : undefined)
   }
+}
+
+function createPrintMenu(): void {
+  SpreadsheetApp.getUi()
+    .createMenu("🖨️ Impresión")
+    .addItem("Regenerar hoja de impresión", regeneratePrint.name)
+    .addToUi()
 }
 
 export function onEdit(event: OnEdit): void {
@@ -493,6 +508,243 @@ function enforceChordHeight(): void {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// PRINT SHEET GENERATION
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+export function detectSectionRanges(range: Range): Range[] {
+  const values = range.getValues()
+  if (values.length === 0 || values[0].length === 0) return []
+
+  const sectionColumns = splitIntoSectionColumns(values)
+
+  let columnOffset = 0
+  return sectionColumns.flatMap(sectionColumn => {
+    const columnWidth = sectionColumn[0].length
+    const sections = splitIntoSections(sectionColumn).map(({ startRow, endRow, width }) =>
+      range
+        .translateTo(range.getColumn() + columnOffset, range.getRow() + startRow)
+        .resizeTo(width, endRow - startRow)
+    )
+    columnOffset += columnWidth
+    return sections
+  })
+}
+
+export function splitIntoSectionColumns(values: unknown[][]): unknown[][][] {
+  const columns: unknown[][][] = []
+  let currentEndCol = values[0].length
+
+  for (let col = values[0].length - 1; col >= 0; col--) {
+    const hasLyricStart = values.some((row, rowIndex) => rowIndex % 2 === 1 && row[col] !== "")
+
+    if (hasLyricStart && col < currentEndCol - 1) {
+      columns.unshift(values.map(row => row.slice(col, currentEndCol)))
+      currentEndCol = col
+    }
+  }
+
+  if (currentEndCol > 0) {
+    const hasAnyContent = values.some(row => row.slice(0, currentEndCol).some(cell => cell !== ""))
+    if (hasAnyContent) {
+      columns.unshift(values.map(row => row.slice(0, currentEndCol)))
+    }
+  }
+
+  return columns
+}
+
+export type SectionBounds = { startRow: number, endRow: number, width: number }
+
+export type PageLayout = Range[][][]
+
+export function regeneratePrint(): void {
+  const chordsSheet = CHORDS_SHEET()
+  const printSheet = PRINT_SHEET()
+
+  const contentStartRow = PRINT_HEADER_HEIGHT + 1
+  const contentHeight = PRINT_PAGE_HEIGHT - PRINT_HEADER_HEIGHT - PRINT_FOOTER_HEIGHT
+
+  const sectionRanges = detectSectionRanges(getWorkingArea(chordsSheet))
+
+  const maxContentHeight = PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT
+  const oversizedSection = sectionRanges.find(
+    s => s.getNumRows() > maxContentHeight || s.getNumColumns() > PRINT_PAGE_WIDTH
+  )
+  if (oversizedSection) {
+    error("Sección demasiado grande", "Una sección excede los límites de la página")
+    return
+  }
+
+  const layout = calculateLayout(
+    sectionRanges,
+    PRINT_PAGE_WIDTH,
+    contentHeight,
+    PRINT_HEADER_HEIGHT,
+    PRINT_HORIZONTAL_PADDING,
+    PRINT_VERTICAL_PADDING
+  )
+
+  const totalPages = layout.length || 1
+  const requiredColumns = totalPages * PRINT_PAGE_WIDTH
+
+  if (printSheet.getMaxColumns() < requiredColumns) {
+    printSheet.insertColumnsAfter(printSheet.getMaxColumns(), requiredColumns - printSheet.getMaxColumns())
+  } else if (printSheet.getMaxColumns() > requiredColumns) {
+    printSheet.deleteColumns(requiredColumns + 1, printSheet.getMaxColumns() - requiredColumns)
+  }
+
+  const contentArea = printSheet.getRange(contentStartRow, 1, contentHeight, requiredColumns)
+  contentArea.clearContent()
+
+  // for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
+  //   const pageRange = printSheet.getRange(1, pageIndex * PRINT_PAGE_WIDTH + 1, PRINT_PAGE_HEIGHT, PRINT_PAGE_WIDTH)
+  //   pageRange.setBorder(true, true, true, true, false, false)
+  // }
+
+  for (let pageIndex = 0; pageIndex < layout.length; pageIndex++) {
+    const page = layout[pageIndex]
+    const pageColumnOffset = pageIndex * PRINT_PAGE_WIDTH
+
+    let columnOffset = 0
+    for (let colIndex = 0; colIndex < page.length; colIndex++) {
+      const column = page[colIndex]
+      let rowOffset = 0
+      for (let sectionIndex = 0; sectionIndex < column.length; sectionIndex++) {
+        const section = column[sectionIndex]
+        if (sectionIndex > 0) rowOffset += PRINT_VERTICAL_PADDING
+        const emptyRichText = SpreadsheetApp.newRichTextValue().setText("").build()
+        const sourceData = section.getRichTextValues().map(row =>
+          row.map(rt => rt ?? emptyRichText)
+        )
+        const targetRange = printSheet.getRange(
+          contentStartRow + rowOffset,
+          pageColumnOffset + columnOffset + 1,
+          section.getNumRows(),
+          section.getNumColumns()
+        )
+        targetRange.setRichTextValues(sourceData)
+        rowOffset += section.getNumRows()
+      }
+      const columnWidth = Math.max(...column.map(s => s.getNumColumns()))
+      columnOffset += columnWidth + (colIndex < page.length - 1 ? PRINT_HORIZONTAL_PADDING : 0)
+    }
+  }
+
+  resetFormatting()
+  success("Impresión generada", `${totalPages} página(s)`)
+}
+
+export function calculateLayout(
+  sections: Range[],
+  pageWidth: number,
+  pageHeight: number,
+  firstPageHeaderHeight: number,
+  horizontalPadding: number = 0,
+  verticalPadding: number = 0
+): PageLayout {
+  const pages: PageLayout = []
+  let currentPage: Range[][] = []
+  let currentColumnWidth = 0
+  let currentColumnHeight = 0
+  let currentRowWidth = 0
+
+  const availableHeight = pageHeight - firstPageHeaderHeight
+
+  for (const section of sections) {
+    const sectionWidth = section.getNumColumns()
+    const sectionHeight = section.getNumRows()
+
+    const vPadding = currentPage.length > 0 && currentPage[currentPage.length - 1].length > 0 ? verticalPadding : 0
+    const hPadding = currentPage.length > 0 ? horizontalPadding : 0
+
+    if (currentColumnHeight + vPadding + sectionHeight <= availableHeight) {
+      if (currentPage.length === 0) {
+        currentPage.push([])
+        currentColumnWidth = sectionWidth
+        currentRowWidth = sectionWidth
+      }
+      currentPage[currentPage.length - 1].push(section)
+      currentColumnHeight += vPadding + sectionHeight
+      currentColumnWidth = Math.max(currentColumnWidth, sectionWidth)
+    } else if (currentRowWidth + hPadding + sectionWidth <= pageWidth) {
+      currentRowWidth += currentColumnWidth + hPadding
+      currentPage.push([section])
+      currentColumnWidth = sectionWidth
+      currentColumnHeight = sectionHeight
+    } else {
+      pages.push(currentPage)
+      currentPage = [[section]]
+      currentColumnWidth = sectionWidth
+      currentRowWidth = sectionWidth
+      currentColumnHeight = sectionHeight
+    }
+  }
+
+  if (currentPage.length > 0) {
+    pages.push(currentPage)
+  }
+
+  return pages
+}
+
+export function splitIntoSections(values: unknown[][]): SectionBounds[] {
+  const sections: SectionBounds[] = []
+  let sectionStartRow: number | null = null
+
+  for (let pairIndex = 0; pairIndex < values.length / 2; pairIndex++) {
+    const chordRow = values[pairIndex * 2]
+    const lyricRow = values[pairIndex * 2 + 1]
+    const isEmpty = chordRow.every(cell => cell === "") && (!lyricRow || lyricRow.every(cell => cell === ""))
+
+    if (isEmpty) {
+      if (sectionStartRow !== null) {
+        sections.push({
+          startRow: sectionStartRow,
+          endRow: pairIndex * 2,
+          width: calculateSectionWidth(values.slice(sectionStartRow, pairIndex * 2))
+        })
+        sectionStartRow = null
+      }
+    } else {
+      if (sectionStartRow === null) {
+        sectionStartRow = pairIndex * 2
+      }
+    }
+  }
+
+  if (sectionStartRow !== null) {
+    sections.push({
+      startRow: sectionStartRow,
+      endRow: values.length,
+      width: calculateSectionWidth(values.slice(sectionStartRow))
+    })
+  }
+
+  return sections
+}
+
+export function calculateSectionWidth(sectionData: unknown[][]): number {
+  let maxLyricWidth = 0
+  let maxChordCol = 0
+
+  for (let row = 0; row < sectionData.length; row++) {
+    if (row % 2 === 1) {
+      const lyricText = String(sectionData[row][0] ?? "")
+      maxLyricWidth = Math.max(maxLyricWidth, Math.ceil(lyricText.length / 2))
+    } else {
+      for (let col = sectionData[row].length - 1; col >= 0; col--) {
+        if (sectionData[row][col] !== "") {
+          maxChordCol = Math.max(maxChordCol, col + 1)
+          break
+        }
+      }
+    }
+  }
+
+  return Math.max(maxLyricWidth, maxChordCol, 1)
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // UTILS
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -506,6 +758,7 @@ const getSheet = (sheetName: string) => (): Sheet => {
 
 const LYRICS_SHEET = getSheet(LYRICS_SHEET_NAME)
 const CHORDS_SHEET = getSheet(CHORDS_SHEET_NAME)
+const PRINT_SHEET = getSheet(PRINT_SHEET_NAME)
 
 
 function getWorkingArea(sheet: Sheet): Range {
