@@ -563,6 +563,38 @@ export function regeneratePrint(): void {
   const totalPages = layout.length || 1
   const requiredColumns = totalPages * PRINT_PAGE_WIDTH
 
+  const emptyRichText = SpreadsheetApp.newRichTextValue().setText("").build()
+  const grid: GoogleAppsScript.Spreadsheet.RichTextValue[][] = Array.from(
+    { length: PRINT_PAGE_HEIGHT },
+    () => Array(requiredColumns).fill(emptyRichText)
+  )
+
+  for (let pageIndex = 0; pageIndex < layout.length; pageIndex++) {
+    const page = layout[pageIndex]
+    const pageColumnOffset = pageIndex * PRINT_PAGE_WIDTH
+    const pageContentStartRow = pageIndex === 0 ? contentStartRow - 1 : 0
+
+    let columnOffset = 0
+    for (let colIndex = 0; colIndex < page.length; colIndex++) {
+      const column = page[colIndex]
+      let rowOffset = 0
+      for (let sectionIndex = 0; sectionIndex < column.length; sectionIndex++) {
+        const section = column[sectionIndex]
+        if (sectionIndex > 0) rowOffset += PRINT_VERTICAL_PADDING
+        const sourceData = section.getRichTextValues()
+        for (let r = 0; r < sourceData.length; r++) {
+          for (let c = 0; c < sourceData[r].length; c++) {
+            grid[pageContentStartRow + rowOffset + r][pageColumnOffset + columnOffset + c] =
+              sourceData[r][c] ?? emptyRichText
+          }
+        }
+        rowOffset += section.getNumRows()
+      }
+      const columnWidth = Math.max(...column.map(s => s.getNumColumns()))
+      columnOffset += columnWidth + (colIndex < page.length - 1 ? PRINT_HORIZONTAL_PADDING : 0)
+    }
+  }
+
   let printSheet = spreadsheet.getSheetByName(PRINT_SHEET_NAME)
   if (printSheet) {
     const rows = printSheet.getMaxRows()
@@ -577,39 +609,11 @@ export function regeneratePrint(): void {
   printSheet.insertRows(1, PRINT_PAGE_HEIGHT - 1)
   printSheet.insertColumns(1, requiredColumns - 1)
 
+  printSheet.getRange(1, 1, PRINT_PAGE_HEIGHT, requiredColumns).setRichTextValues(grid)
+
   for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
     const pageRange = printSheet.getRange(1, pageIndex * PRINT_PAGE_WIDTH + 1, PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT, PRINT_PAGE_WIDTH)
     pageRange.setBorder(true, true, true, true, false, false)
-  }
-
-  for (let pageIndex = 0; pageIndex < layout.length; pageIndex++) {
-    const page = layout[pageIndex]
-    const pageColumnOffset = pageIndex * PRINT_PAGE_WIDTH
-    const pageContentStartRow = pageIndex === 0 ? contentStartRow : 1
-
-    let columnOffset = 0
-    for (let colIndex = 0; colIndex < page.length; colIndex++) {
-      const column = page[colIndex]
-      let rowOffset = 0
-      for (let sectionIndex = 0; sectionIndex < column.length; sectionIndex++) {
-        const section = column[sectionIndex]
-        if (sectionIndex > 0) rowOffset += PRINT_VERTICAL_PADDING
-        const emptyRichText = SpreadsheetApp.newRichTextValue().setText("").build()
-        const sourceData = section.getRichTextValues().map(row =>
-          row.map(rt => rt ?? emptyRichText)
-        )
-        const targetRange = printSheet.getRange(
-          pageContentStartRow + rowOffset,
-          pageColumnOffset + columnOffset + 1,
-          section.getNumRows(),
-          section.getNumColumns()
-        )
-        targetRange.setRichTextValues(sourceData)
-        rowOffset += section.getNumRows()
-      }
-      const columnWidth = Math.max(...column.map(s => s.getNumColumns()))
-      columnOffset += columnWidth + (colIndex < page.length - 1 ? PRINT_HORIZONTAL_PADDING : 0)
-    }
   }
 
   generatePrintHeader(printSheet)
