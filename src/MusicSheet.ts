@@ -21,6 +21,11 @@ const CHORDS_HEADER_RANGE_NAME = "Encabezado_Acordes"
 const AUTHOR_RANGE_NAME = "Autor"
 const TEMPO_RANGE_NAME = "Tempo"
 const NOTES_RANGE_NAME = "Notas"
+const CONTENT_MARGIN_H_RANGE_NAME = "Margen_H"
+const CONTENT_MARGIN_V_RANGE_NAME = "Margen_V"
+const HEADER_MARGIN_H_RANGE_NAME = "Margen_Encabezado"
+const HORIZONTAL_PADDING_RANGE_NAME = "Separación_H"
+const VERTICAL_PADDING_RANGE_NAME = "Separación_V"
 
 const FONT_FAMILY = "Space Mono"
 const FONT_SIZE = 10
@@ -38,11 +43,16 @@ const PRINT_PAGE_WIDTH = 46
 const PRINT_PAGE_HEIGHT = 51
 const PRINT_HEADER_HEIGHT = 4
 const PRINT_FOOTER_HEIGHT = 1
-const PRINT_HORIZONTAL_PADDING = 2
-const PRINT_VERTICAL_PADDING = 2
-const PRINT_CONTENT_MARGIN_H = 1
-const PRINT_CONTENT_MARGIN_V = 1
-const PRINT_HEADER_MARGIN_H = 1
+const DEFAULT_PRINT_HORIZONTAL_PADDING = 2
+const DEFAULT_PRINT_VERTICAL_PADDING = 2
+const DEFAULT_PRINT_CONTENT_MARGIN_H = 1
+const DEFAULT_PRINT_CONTENT_MARGIN_V = 1
+const DEFAULT_PRINT_HEADER_MARGIN_H = 1
+
+function getNumericSetting(rangeName: string, defaultValue: number): number {
+  const value = Number(SPREADSHEET().getRangeByName(rangeName)?.getValue())
+  return Number.isFinite(value) && value >= 0 ? value : defaultValue
+}
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // HOOKS
@@ -541,8 +551,13 @@ export function regeneratePrint(): void {
   const chordsSheet = CHORDS_SHEET()
   const spreadsheet = SPREADSHEET()
 
-  const availableWidth = PRINT_PAGE_WIDTH - 2 * PRINT_CONTENT_MARGIN_H
-  const availableHeight = PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT - PRINT_CONTENT_MARGIN_V
+  const contentMarginH = getNumericSetting(CONTENT_MARGIN_H_RANGE_NAME, DEFAULT_PRINT_CONTENT_MARGIN_H)
+  const contentMarginV = getNumericSetting(CONTENT_MARGIN_V_RANGE_NAME, DEFAULT_PRINT_CONTENT_MARGIN_V)
+  const horizontalPadding = getNumericSetting(HORIZONTAL_PADDING_RANGE_NAME, DEFAULT_PRINT_HORIZONTAL_PADDING)
+  const verticalPadding = getNumericSetting(VERTICAL_PADDING_RANGE_NAME, DEFAULT_PRINT_VERTICAL_PADDING)
+
+  const availableWidth = PRINT_PAGE_WIDTH - 2 * contentMarginH
+  const availableHeight = PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT - contentMarginV
 
   const sectionRanges = detectSectionRanges(getWorkingArea(chordsSheet))
 
@@ -559,8 +574,8 @@ export function regeneratePrint(): void {
     availableWidth,
     availableHeight,
     PRINT_HEADER_HEIGHT,
-    PRINT_HORIZONTAL_PADDING,
-    PRINT_VERTICAL_PADDING
+    horizontalPadding,
+    verticalPadding
   )
 
   const totalPages = layout.length || 1
@@ -574,15 +589,15 @@ export function regeneratePrint(): void {
 
   for (let pageIndex = 0; pageIndex < layout.length; pageIndex++) {
     const page = layout[pageIndex]
-    const pageColumnOffset = pageIndex * PRINT_PAGE_WIDTH + PRINT_CONTENT_MARGIN_H
-    const pageContentStartRow = pageIndex === 0 ? PRINT_HEADER_HEIGHT : PRINT_CONTENT_MARGIN_V
+    const pageColumnOffset = pageIndex * PRINT_PAGE_WIDTH + contentMarginH
+    const pageContentStartRow = pageIndex === 0 ? PRINT_HEADER_HEIGHT : contentMarginV
 
     const columnWidths = page.map(column => Math.max(...column.map(s => s.getNumColumns())))
     const totalColumnsWidth = columnWidths.reduce((sum, w) => sum + w, 0)
     const gaps = page.length - 1
-    const extraSpace = availableWidth - totalColumnsWidth - gaps * PRINT_HORIZONTAL_PADDING
+    const extraSpace = availableWidth - totalColumnsWidth - gaps * horizontalPadding
     const effectivePadding = gaps > 0
-      ? PRINT_HORIZONTAL_PADDING + Math.floor(extraSpace / gaps)
+      ? horizontalPadding + Math.floor(extraSpace / gaps)
       : 0
 
     let columnOffset = 0
@@ -591,7 +606,7 @@ export function regeneratePrint(): void {
       let rowOffset = 0
       for (let sectionIndex = 0; sectionIndex < column.length; sectionIndex++) {
         const section = column[sectionIndex]
-        if (sectionIndex > 0) rowOffset += PRINT_VERTICAL_PADDING
+        if (sectionIndex > 0) rowOffset += verticalPadding
         const sourceData = section.getRichTextValues()
         for (let r = 0; r < sourceData.length; r++) {
           for (let c = 0; c < sourceData[r].length; c++) {
@@ -640,8 +655,9 @@ function generatePrintHeader(printSheet: Sheet): void {
   const tempo = String(SPREADSHEET().getRangeByName(TEMPO_RANGE_NAME)?.getValue() ?? "")
   const notes = String(SPREADSHEET().getRangeByName(NOTES_RANGE_NAME)?.getValue() ?? "")
 
-  const headerWidth = PRINT_PAGE_WIDTH - 2 * PRINT_HEADER_MARGIN_H
-  const headerStart = 1 + PRINT_HEADER_MARGIN_H
+  const headerMarginH = getNumericSetting(HEADER_MARGIN_H_RANGE_NAME, DEFAULT_PRINT_HEADER_MARGIN_H)
+  const headerWidth = PRINT_PAGE_WIDTH - 2 * headerMarginH
+  const headerStart = 1 + headerMarginH
 
   const titleRange = printSheet.getRange(1, headerStart, 2, headerWidth)
   titleRange.merge()
