@@ -8,7 +8,7 @@ type OnEdit = GoogleAppsScript.Events.SheetsOnEdit
 type OnChange = GoogleAppsScript.Events.SheetsOnChange
 
 
-const VERSION = "2.1"
+const VERSION = "3.0"
 
 const LYRICS_SHEET_NAME = "Letra"
 const CHORDS_SHEET_NAME = "Acordes"
@@ -42,6 +42,7 @@ const PRINT_HORIZONTAL_PADDING = 2
 const PRINT_VERTICAL_PADDING = 2
 const PRINT_CONTENT_MARGIN_H = 1
 const PRINT_CONTENT_MARGIN_V = 1
+const PRINT_HEADER_MARGIN_H = 1
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // HOOKS
@@ -631,7 +632,6 @@ export function regeneratePrint(): void {
   }
 
   resetFormatting()
-  success("Impresión generada", `${totalPages} página(s)`)
 }
 
 function generatePrintHeader(printSheet: Sheet): void {
@@ -640,20 +640,23 @@ function generatePrintHeader(printSheet: Sheet): void {
   const tempo = String(SPREADSHEET().getRangeByName(TEMPO_RANGE_NAME)?.getValue() ?? "")
   const notes = String(SPREADSHEET().getRangeByName(NOTES_RANGE_NAME)?.getValue() ?? "")
 
-  const titleRange = printSheet.getRange(1, 1, 2, PRINT_PAGE_WIDTH)
+  const headerWidth = PRINT_PAGE_WIDTH - 2 * PRINT_HEADER_MARGIN_H
+  const headerStart = 1 + PRINT_HEADER_MARGIN_H
+
+  const titleRange = printSheet.getRange(1, headerStart, 2, headerWidth)
   titleRange.merge()
   titleRange.setValue(SPREADSHEET().getName())
   titleRange.setFontSize(14)
   titleRange.setFontWeight("bold")
   titleRange.setVerticalAlignment("bottom")
 
-  const authorRange = printSheet.getRange(3, 1, 1, Math.floor(PRINT_PAGE_WIDTH / 2))
+  const authorRange = printSheet.getRange(3, headerStart, 1, Math.floor(headerWidth / 2))
   authorRange.merge()
   authorRange.setValue(author)
   authorRange.setFontSize(8)
 
   const timestamp = `${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd")}:${VERSION}`
-  const timestampRange = printSheet.getRange(3, Math.floor(PRINT_PAGE_WIDTH / 2) + 1, 1, Math.ceil(PRINT_PAGE_WIDTH / 2))
+  const timestampRange = printSheet.getRange(3, headerStart + Math.floor(headerWidth / 2), 1, Math.ceil(headerWidth / 2))
   timestampRange.merge()
   timestampRange.setValue(timestamp)
   timestampRange.setHorizontalAlignment("right")
@@ -662,7 +665,7 @@ function generatePrintHeader(printSheet: Sheet): void {
   const keyTempo = [key ? `[${key}]` : "", tempo ? `${tempo} bpm` : ""].filter(Boolean).join(" ")
   const prefix = keyTempo && notes ? `${keyTempo} | ` : keyTempo
   const fullText = prefix + notes
-  const infoRange = printSheet.getRange(4, 1, 1, PRINT_PAGE_WIDTH)
+  const infoRange = printSheet.getRange(4, headerStart, 1, headerWidth)
   infoRange.merge()
   if (notes) {
     const richText = SpreadsheetApp.newRichTextValue()
