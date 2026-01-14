@@ -576,6 +576,14 @@ export function regeneratePrint(): void {
     const pageColumnOffset = pageIndex * PRINT_PAGE_WIDTH + PRINT_CONTENT_MARGIN_H
     const pageContentStartRow = pageIndex === 0 ? PRINT_HEADER_HEIGHT : PRINT_CONTENT_MARGIN_V
 
+    const columnWidths = page.map(column => Math.max(...column.map(s => s.getNumColumns())))
+    const totalColumnsWidth = columnWidths.reduce((sum, w) => sum + w, 0)
+    const gaps = page.length - 1
+    const extraSpace = availableWidth - totalColumnsWidth - gaps * PRINT_HORIZONTAL_PADDING
+    const effectivePadding = gaps > 0
+      ? PRINT_HORIZONTAL_PADDING + Math.floor(extraSpace / gaps)
+      : 0
+
     let columnOffset = 0
     for (let colIndex = 0; colIndex < page.length; colIndex++) {
       const column = page[colIndex]
@@ -592,8 +600,7 @@ export function regeneratePrint(): void {
         }
         rowOffset += section.getNumRows()
       }
-      const columnWidth = Math.max(...column.map(s => s.getNumColumns()))
-      columnOffset += columnWidth + (colIndex < page.length - 1 ? PRINT_HORIZONTAL_PADDING : 0)
+      columnOffset += columnWidths[colIndex] + (colIndex < page.length - 1 ? effectivePadding : 0)
     }
   }
 
