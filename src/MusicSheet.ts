@@ -35,7 +35,7 @@ const PADDING = 3
 const TRIGGERS_INSTALLED_PROPERTY = "triggers_installed"
 
 const PRINT_PAGE_WIDTH = 46
-const PRINT_PAGE_HEIGHT = 52
+const PRINT_PAGE_HEIGHT = 51
 const PRINT_HEADER_HEIGHT = 5
 const PRINT_FOOTER_HEIGHT = 1
 const PRINT_HORIZONTAL_PADDING = 2
@@ -696,23 +696,46 @@ export function calculateLayout(
   const getAvailableHeight = () =>
     pages.length === 0 ? pageHeight - firstPageHeaderHeight : pageHeight
 
+  const canStackInCurrentColumn = (sectionHeight: number) =>
+    currentPage.length > 0 &&
+    currentColumnHeight + verticalPadding + sectionHeight <= getAvailableHeight()
+
+  const canFitNewColumn = (newColumnWidth: number) => {
+    const hPadding = currentPage.length > 0 ? horizontalPadding : 0
+    return currentRowWidth + currentColumnWidth + hPadding + newColumnWidth <= pageWidth
+  }
+
+  const canGrowCurrentColumn = (newWidth: number) =>
+    currentRowWidth + newWidth <= pageWidth
+
   for (const section of sections) {
     const sectionWidth = section.getNumColumns()
     const sectionHeight = section.getNumRows()
 
-    const vPadding = currentPage.length > 0 && currentPage[currentPage.length - 1].length > 0 ? verticalPadding : 0
-    const hPadding = currentPage.length > 0 ? horizontalPadding : 0
-
-    if (currentColumnHeight + vPadding + sectionHeight <= getAvailableHeight()) {
-      if (currentPage.length === 0) {
-        currentPage.push([])
+    if (currentPage.length === 0) {
+      currentPage.push([section])
+      currentColumnWidth = sectionWidth
+      currentColumnHeight = sectionHeight
+    } else if (canStackInCurrentColumn(sectionHeight)) {
+      const grownWidth = Math.max(currentColumnWidth, sectionWidth)
+      if (canGrowCurrentColumn(grownWidth)) {
+        currentPage[currentPage.length - 1].push(section)
+        currentColumnHeight += verticalPadding + sectionHeight
+        currentColumnWidth = grownWidth
+      } else if (canFitNewColumn(sectionWidth)) {
+        currentRowWidth += currentColumnWidth + horizontalPadding
+        currentPage.push([section])
         currentColumnWidth = sectionWidth
+        currentColumnHeight = sectionHeight
+      } else {
+        pages.push(currentPage)
+        currentPage = [[section]]
+        currentColumnWidth = sectionWidth
+        currentRowWidth = 0
+        currentColumnHeight = sectionHeight
       }
-      currentPage[currentPage.length - 1].push(section)
-      currentColumnHeight += vPadding + sectionHeight
-      currentColumnWidth = Math.max(currentColumnWidth, sectionWidth)
-    } else if (currentRowWidth + currentColumnWidth + hPadding + sectionWidth <= pageWidth) {
-      currentRowWidth += currentColumnWidth + hPadding
+    } else if (canFitNewColumn(sectionWidth)) {
+      currentRowWidth += currentColumnWidth + horizontalPadding
       currentPage.push([section])
       currentColumnWidth = sectionWidth
       currentColumnHeight = sectionHeight
@@ -770,7 +793,7 @@ export function splitIntoSections(values: unknown[][]): SectionBounds[] {
 
 export function calculateSectionWidth(sectionData: unknown[][]): number {
   let maxLyricWidth = 0
-  let maxChordCol = 0
+  let maxChordEnd = 0
 
   for (let row = 0; row < sectionData.length; row++) {
     if (row % 2 === 1) {
@@ -778,15 +801,17 @@ export function calculateSectionWidth(sectionData: unknown[][]): number {
       maxLyricWidth = Math.max(maxLyricWidth, Math.ceil(lyricText.length / 2))
     } else {
       for (let col = sectionData[row].length - 1; col >= 0; col--) {
-        if (sectionData[row][col] !== "") {
-          maxChordCol = Math.max(maxChordCol, col + 1)
+        const chordText = String(sectionData[row][col] ?? "")
+        if (chordText !== "") {
+          const chordEnd = col + 1 + Math.ceil(chordText.length / 2)
+          maxChordEnd = Math.max(maxChordEnd, chordEnd)
           break
         }
       }
     }
   }
 
-  return Math.max(maxLyricWidth, maxChordCol, 1)
+  return Math.max(maxLyricWidth, maxChordEnd, 1)
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════

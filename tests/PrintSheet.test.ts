@@ -174,7 +174,9 @@ describe("splitIntoSections", () => {
     ]
     const result = splitIntoSections(values)
     expect(result).toHaveLength(2)
-    expect(result[0]).toEqual({ startRow: 0, endRow: 2, width: 2 })
+    // C at col 1: end = 1 + 1 + ceil(1/2) = 3
+    expect(result[0]).toEqual({ startRow: 0, endRow: 2, width: 3 })
+    // D at col 0: end = 2, lyric "Hello" = 3
     expect(result[1]).toEqual({ startRow: 4, endRow: 6, width: 3 })
   })
 
@@ -208,8 +210,11 @@ describe("splitIntoSections", () => {
     ]
     const result = splitIntoSections(values)
     expect(result).toHaveLength(3)
+    // C at col 0: end = 2, lyric "One" = 2
     expect(result[0]).toEqual({ startRow: 0, endRow: 2, width: 2 })
-    expect(result[1]).toEqual({ startRow: 4, endRow: 6, width: 2 })
+    // D at col 1: end = 1 + 1 + 1 = 3, lyric "Two" = 2
+    expect(result[1]).toEqual({ startRow: 4, endRow: 6, width: 3 })
+    // E at col 0: end = 2, lyric "Three" = 3
     expect(result[2]).toEqual({ startRow: 8, endRow: 10, width: 3 })
   })
 })
@@ -227,12 +232,13 @@ describe("calculateSectionWidth", () => {
     expect(calculateSectionWidth(section)).toBe(3)
   })
 
-  it("should calculate width from chord position", () => {
+  it("should calculate width from chord position plus chord length", () => {
     const section = [
       ["", "", "", "C", ""],
       ["Hi", "", "", "", ""]
     ]
-    expect(calculateSectionWidth(section)).toBe(4)
+    // C at col 3, length 1: end = 3 + 1 + ceil(1/2) = 5
+    expect(calculateSectionWidth(section)).toBe(5)
   })
 
   it("should use max of lyric width and chord position", () => {
@@ -261,12 +267,23 @@ describe("calculateSectionWidth", () => {
     expect(calculateSectionWidth(section)).toBe(15)
   })
 
-  it("should handle chord at far right", () => {
+  it("should handle chord at far right with chord length", () => {
     const section = [
       ["", "", "", "", "", "", "", "", "", "Am"],
       ["Short", "", "", "", "", "", "", "", "", ""]
     ]
-    expect(calculateSectionWidth(section)).toBe(10)
+    // Am at col 9, length 2: end = 9 + 1 + ceil(2/2) = 11
+    expect(calculateSectionWidth(section)).toBe(11)
+  })
+
+  it("should account for long chord names overflowing their cell", () => {
+    const section = [
+      ["", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "B#aug"],
+      ["Short lyric", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
+    ]
+    // B#aug at col 20, length 5: end = 20 + 1 + ceil(5/2) = 24
+    // Lyric "Short lyric" = ceil(11/2) = 6
+    expect(calculateSectionWidth(section)).toBe(24)
   })
 })
 
@@ -427,6 +444,24 @@ describe("calculateLayout", () => {
     expect(result[0]).toHaveLength(2)  // columns 1 and 2
     expect(result[0][0]).toEqual([s1, s2])
     expect(result[0][1]).toEqual([s3])
+    expect(result[1][0]).toEqual([s4])
+  })
+
+  it("should not allow stacking when it would cause column width to overflow page", () => {
+    // Page width: 46, already have columns totaling 31w (14 + 2 + 15)
+    // Column 3 starts with 13w section, then tries to stack 15w section
+    // 31 + 2 + 15 = 48 > 46, so the 15w section should NOT stack
+    const s1 = mockSection(14, 44)  // column 1
+    const s2 = mockSection(15, 30)  // column 2: doesn't stack (44+30 > 46)
+    const s3 = mockSection(13, 16)  // column 3: fits (14+2+15+2+13=46)
+    const s4 = mockSection(15, 8)   // would grow column 3 to 15w: 14+2+15+2+15=48 > 46
+    const result = calculateLayout([s1, s2, s3, s4], 46, 51, 5, 2, 2)
+    // s4 should NOT stack into column 3, should go to new page
+    expect(result).toHaveLength(2)
+    expect(result[0]).toHaveLength(3)
+    expect(result[0][0]).toEqual([s1])
+    expect(result[0][1]).toEqual([s2])
+    expect(result[0][2]).toEqual([s3])
     expect(result[1][0]).toEqual([s4])
   })
 })
