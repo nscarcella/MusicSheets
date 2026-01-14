@@ -8,7 +8,7 @@ type OnEdit = GoogleAppsScript.Events.SheetsOnEdit
 type OnChange = GoogleAppsScript.Events.SheetsOnChange
 
 
-const VERSION = "3.0"
+const VERSION = "1.0"
 
 const LYRICS_SHEET_NAME = "Letra"
 const CHORDS_SHEET_NAME = "Acordes"
@@ -573,7 +573,7 @@ export function regeneratePrint(): void {
     sectionRanges,
     availableWidth,
     availableHeight,
-    PRINT_HEADER_HEIGHT,
+    PRINT_HEADER_HEIGHT + contentMarginV,
     horizontalPadding,
     verticalPadding
   )
@@ -590,7 +590,7 @@ export function regeneratePrint(): void {
   for (let pageIndex = 0; pageIndex < layout.length; pageIndex++) {
     const page = layout[pageIndex]
     const pageColumnOffset = pageIndex * PRINT_PAGE_WIDTH + contentMarginH
-    const pageContentStartRow = pageIndex === 0 ? PRINT_HEADER_HEIGHT : contentMarginV
+    const pageContentStartRow = pageIndex === 0 ? PRINT_HEADER_HEIGHT + contentMarginV : contentMarginV
 
     const columnWidths = page.map(column => Math.max(...column.map(s => s.getNumColumns())))
     const totalColumnsWidth = columnWidths.reduce((sum, w) => sum + w, 0)
@@ -692,6 +692,8 @@ function generatePrintHeader(printSheet: Sheet): void {
   } else {
     infoRange.setValue(fullText)
   }
+  infoRange.setFontSize(9)
+  infoRange.setVerticalAlignment("top")
   infoRange.setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
 
   const headerRange = printSheet.getRange(1, 1, PRINT_HEADER_HEIGHT, PRINT_PAGE_WIDTH)
