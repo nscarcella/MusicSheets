@@ -563,26 +563,19 @@ export function regeneratePrint(): void {
   const totalPages = layout.length || 1
   const requiredColumns = totalPages * PRINT_PAGE_WIDTH
 
-  const existingPrintSheet = spreadsheet.getSheetByName(PRINT_SHEET_NAME)
-  if (existingPrintSheet) {
-    spreadsheet.deleteSheet(existingPrintSheet)
-  }
-  const printSheet = spreadsheet.insertSheet(PRINT_SHEET_NAME, spreadsheet.getNumSheets())
-
-  const currentRows = printSheet.getMaxRows()
-  const currentColumns = printSheet.getMaxColumns()
-
-  if (currentRows < PRINT_PAGE_HEIGHT) {
-    printSheet.insertRows(1, PRINT_PAGE_HEIGHT - currentRows)
-  } else if (currentRows > PRINT_PAGE_HEIGHT) {
-    printSheet.deleteRows(PRINT_PAGE_HEIGHT + 1, currentRows - PRINT_PAGE_HEIGHT)
+  let printSheet = spreadsheet.getSheetByName(PRINT_SHEET_NAME)
+  if (printSheet) {
+    const rows = printSheet.getMaxRows()
+    const cols = printSheet.getMaxColumns()
+    if (rows > 1) printSheet.deleteRows(2, rows - 1)
+    if (cols > 1) printSheet.deleteColumns(2, cols - 1)
+    printSheet.clear()
+  } else {
+    printSheet = spreadsheet.insertSheet(PRINT_SHEET_NAME, spreadsheet.getNumSheets())
   }
 
-  if (currentColumns < requiredColumns) {
-    printSheet.insertColumns(1, requiredColumns - currentColumns)
-  } else if (currentColumns > requiredColumns) {
-    printSheet.deleteColumns(requiredColumns + 1, currentColumns - requiredColumns)
-  }
+  printSheet.insertRows(1, PRINT_PAGE_HEIGHT - 1)
+  printSheet.insertColumns(1, requiredColumns - 1)
 
   for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
     const pageRange = printSheet.getRange(1, pageIndex * PRINT_PAGE_WIDTH + 1, PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT, PRINT_PAGE_WIDTH)
