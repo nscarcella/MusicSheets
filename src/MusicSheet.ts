@@ -40,6 +40,8 @@ const PRINT_HEADER_HEIGHT = 4
 const PRINT_FOOTER_HEIGHT = 1
 const PRINT_HORIZONTAL_PADDING = 2
 const PRINT_VERTICAL_PADDING = 2
+const PRINT_CONTENT_MARGIN_H = 1
+const PRINT_CONTENT_MARGIN_V = 1
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // HOOKS
@@ -538,13 +540,13 @@ export function regeneratePrint(): void {
   const chordsSheet = CHORDS_SHEET()
   const spreadsheet = SPREADSHEET()
 
-  const contentStartRow = PRINT_HEADER_HEIGHT + 1
-  const maxContentHeight = PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT
+  const availableWidth = PRINT_PAGE_WIDTH - 2 * PRINT_CONTENT_MARGIN_H
+  const availableHeight = PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT - PRINT_CONTENT_MARGIN_V
 
   const sectionRanges = detectSectionRanges(getWorkingArea(chordsSheet))
 
   const oversizedSection = sectionRanges.find(
-    s => s.getNumRows() > maxContentHeight || s.getNumColumns() > PRINT_PAGE_WIDTH
+    s => s.getNumRows() > availableHeight || s.getNumColumns() > availableWidth
   )
   if (oversizedSection) {
     error("Sección demasiado grande", "Una sección excede los límites de la página")
@@ -553,8 +555,8 @@ export function regeneratePrint(): void {
 
   const layout = calculateLayout(
     sectionRanges,
-    PRINT_PAGE_WIDTH,
-    maxContentHeight,
+    availableWidth,
+    availableHeight,
     PRINT_HEADER_HEIGHT,
     PRINT_HORIZONTAL_PADDING,
     PRINT_VERTICAL_PADDING
@@ -571,8 +573,8 @@ export function regeneratePrint(): void {
 
   for (let pageIndex = 0; pageIndex < layout.length; pageIndex++) {
     const page = layout[pageIndex]
-    const pageColumnOffset = pageIndex * PRINT_PAGE_WIDTH
-    const pageContentStartRow = pageIndex === 0 ? contentStartRow - 1 : 0
+    const pageColumnOffset = pageIndex * PRINT_PAGE_WIDTH + PRINT_CONTENT_MARGIN_H
+    const pageContentStartRow = pageIndex === 0 ? PRINT_HEADER_HEIGHT : PRINT_CONTENT_MARGIN_V
 
     let columnOffset = 0
     for (let colIndex = 0; colIndex < page.length; colIndex++) {
