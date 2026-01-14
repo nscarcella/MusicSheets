@@ -36,7 +36,7 @@ const TRIGGERS_INSTALLED_PROPERTY = "triggers_installed"
 
 const PRINT_PAGE_WIDTH = 46
 const PRINT_PAGE_HEIGHT = 51
-const PRINT_HEADER_HEIGHT = 5
+const PRINT_HEADER_HEIGHT = 4
 const PRINT_FOOTER_HEIGHT = 1
 const PRINT_HORIZONTAL_PADDING = 2
 const PRINT_VERTICAL_PADDING = 2
@@ -641,28 +641,33 @@ function generatePrintHeader(printSheet: Sheet): void {
   titleRange.setFontWeight("bold")
   titleRange.setVerticalAlignment("bottom")
 
-  const authorRange = printSheet.getRange(3, 1, 1, PRINT_PAGE_WIDTH)
+  const authorRange = printSheet.getRange(3, 1, 1, Math.floor(PRINT_PAGE_WIDTH / 2))
   authorRange.merge()
   authorRange.setValue(author)
   authorRange.setFontSize(8)
 
-  const infoText = [key ? `[${key}]` : "", tempo ? `${tempo} bpm` : ""].filter(Boolean).join(" ")
-  const infoRange = printSheet.getRange(4, 1, 1, Math.floor(PRINT_PAGE_WIDTH / 2))
-  infoRange.merge()
-  infoRange.setValue(infoText)
-
   const timestamp = `${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd")}:${VERSION}`
-  const timestampRange = printSheet.getRange(4, Math.floor(PRINT_PAGE_WIDTH / 2) + 1, 1, Math.ceil(PRINT_PAGE_WIDTH / 2))
+  const timestampRange = printSheet.getRange(3, Math.floor(PRINT_PAGE_WIDTH / 2) + 1, 1, Math.ceil(PRINT_PAGE_WIDTH / 2))
   timestampRange.merge()
   timestampRange.setValue(timestamp)
   timestampRange.setHorizontalAlignment("right")
   timestampRange.setFontSize(8)
 
-  const notesRange = printSheet.getRange(5, 1, 1, PRINT_PAGE_WIDTH)
-  notesRange.merge()
-  notesRange.setValue(notes)
-  notesRange.setFontStyle("italic")
-  notesRange.setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
+  const keyTempo = [key ? `[${key}]` : "", tempo ? `${tempo} bpm` : ""].filter(Boolean).join(" ")
+  const prefix = keyTempo && notes ? `${keyTempo} | ` : keyTempo
+  const fullText = prefix + notes
+  const infoRange = printSheet.getRange(4, 1, 1, PRINT_PAGE_WIDTH)
+  infoRange.merge()
+  if (notes) {
+    const richText = SpreadsheetApp.newRichTextValue()
+      .setText(fullText)
+      .setTextStyle(prefix.length, fullText.length, SpreadsheetApp.newTextStyle().setItalic(true).build())
+      .build()
+    infoRange.setRichTextValue(richText)
+  } else {
+    infoRange.setValue(fullText)
+  }
+  infoRange.setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
 
   const headerRange = printSheet.getRange(1, 1, PRINT_HEADER_HEIGHT, PRINT_PAGE_WIDTH)
   headerRange.setBorder(true, true, true, true, false, false)
