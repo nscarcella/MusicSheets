@@ -1,5 +1,7 @@
 import { Chord } from "./Chords"
 import "./Range"
+import { $, CellValue } from "./Spaces"
+import { Area } from "./Area"
 
 type Spreadsheet = GoogleAppsScript.Spreadsheet.Spreadsheet
 type Sheet = GoogleAppsScript.Spreadsheet.Sheet
@@ -10,14 +12,12 @@ type OnChange = GoogleAppsScript.Events.SheetsOnChange
 
 const VERSION = "1.0"
 
-const LYRICS_SHEET_NAME = "Letra"
-const CHORDS_SHEET_NAME = "Acordes"
-const PRINT_SHEET_NAME = "Impresión"
+const _LYRICS_SHEET_NAME = "Letra"
+const _CHORDS_SHEET_NAME = "Acordes"
+const _PRINT_SHEET_NAME = "Impresión"
 
-const LYRICS_RIGHT_TRAY_RANGE_NAME = "Ideas_Sueltas"
-const KEY_RANGE_NAME = "Tonalidad"
-const AUTOTRANSPOSE_RANGE_NAME = "Auto_Trasponer"
-const CHORDS_HEADER_RANGE_NAME = "Encabezado_Acordes"
+const _LYRICS_RIGHT_TRAY_RANGE_NAME = "Ideas_Sueltas"
+const _KEY_RANGE_NAME = "Tonalidad"
 const AUTHOR_RANGE_NAME = "Autor"
 const TEMPO_RANGE_NAME = "Tempo"
 const NOTES_RANGE_NAME = "Notas"
@@ -60,35 +60,37 @@ function getNumericSetting(rangeName: string, defaultValue: number): number {
 
 export function onOpen(): void {
   try {
-    createMissingTriggerWarning()
-    createPrintMenu()
+    if (!PropertiesService.getDocumentProperties().getProperty(TRIGGERS_INSTALLED_PROPERTY))
+      SpreadsheetApp.getUi()
+        .createMenu("⚠️")
+        .addItem("Autorizar la extensión para habilitar la sincronización de texto avanzada", setupTriggers.name)
+        .addToUi()
+
+    SpreadsheetApp.getUi()
+      .createMenu("🖨️ Impresión")
+      .addItem("Regenerar hoja de impresión", regeneratePrint.name)
+      .addToUi()
   } catch (error) {
     warn("Unexpected error in onOpen hook", error instanceof Error ? error.message : undefined)
   }
 }
 
-function createPrintMenu(): void {
-  SpreadsheetApp.getUi()
-    .createMenu("🖨️ Impresión")
-    .addItem("Regenerar hoja de impresión", regeneratePrint.name)
-    .addToUi()
-}
-
 export function onEdit(event: OnEdit): void {
   try {
-    const editedRange = event.range
-    const editedSheet = editedRange.getSheet()
+    const sheet = $.get(event.range.getSheet().getName())
+    const changed = Area.fromRange(event.range)
 
-    switch (editedSheet.getName()) {
-      case LYRICS_SHEET_NAME:
-        syncLyricsToChordSheet(editedRange)
+    switch (sheet.name) {
+      case $.Lyrics.name:
+        restoreIndexes(changed)
+        syncLyricsToChordSheet(changed)
         enforceChordHeight()
         break
 
-      case CHORDS_SHEET_NAME:
-        handleKeyChange(editedRange, event.oldValue)
-        disableAutoTransposeIfKeyIsInvalid(editedRange)
-        syncLyricsFromChordSheet(editedRange)
+      case $.Chords.name:
+        syncLyricsFromChordSheet(changed)
+        handleKeyChange(changed, event.oldValue)
+        disableAutoTransposeIfKeyIsInvalid(changed)
         break
     }
   } catch (error) {
@@ -96,11 +98,12 @@ export function onEdit(event: OnEdit): void {
   }
 }
 
+// TODO: PENDING REFACTOR
 export function onChange(event: OnChange): void {
   try {
     if (event.changeType === "INSERT_COLUMN" || event.changeType === "REMOVE_COLUMN") {
       const lyricsSheet = LYRICS_SHEET()
-      const trayWidth = SPREADSHEET().getRangeByName(LYRICS_RIGHT_TRAY_RANGE_NAME)?.getNumColumns() ?? 0
+      const trayWidth = SPREADSHEET().getRangeByName(_LYRICS_RIGHT_TRAY_RANGE_NAME)?.getNumColumns() ?? 0
       const rangeStart = lyricsSheet.getFrozenColumns() + 1
       const rangeEnd = lyricsSheet.getMaxColumns() - trayWidth
 
@@ -121,210 +124,142 @@ export function onChange(event: OnChange): void {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-// SYNC LOGIC
+// SYNC LYRICS
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-function syncLyricsToChordSheet(range: Range): void {
-  const sourceSheet = range.getSheet()
-  const sourceWorkingArea = getWorkingArea(sourceSheet)
+export function syncLyricsToChordSheet(changed: Area): void {
+  const source = $.Lyrics.main.sub(area => area.intersect(changed))
+  const target = $.Chords.main.sub(area => source.area
+    .relativeTo($.Lyrics.main)
+    .scale({ y: 2 })
+    .translate(area)
+  )
 
-  const targetSheet = CHORDS_SHEET()
-  const targetWorkingArea = getWorkingArea(targetSheet)
-
-  const sourceRange = sourceWorkingArea.intersect(range)
-  if (!sourceRange) return
-
-  const targetRange = sourceRange
-    .projectInto(targetSheet)
-    .scale(1, 2)
-    .translate(
-      targetWorkingArea.getColumn() - sourceWorkingArea.getColumn(),
-      targetWorkingArea.getRow() - sourceWorkingArea.getRow() + (sourceRange.getRow() - sourceWorkingArea.getRow())
-    )
-
-  const blackText = SpreadsheetApp.newTextStyle().setForegroundColor("#000000").build()
-
-  const sourceRichText = sourceRange.getRichTextValues()
-  const targetRichText = targetRange.getRichTextValues()
-
-  const emptyRichText = SpreadsheetApp.newRichTextValue().setText("").build()
-
-  sourceRichText.forEach((sourceRow, rowOffset) => {
-    targetRichText[rowOffset * 2 + 1] = sourceRow.map(rt =>
-      rt?.getText() ? rt.copy().setTextStyle(0, rt.getText().length, blackText).build() : emptyRichText
-    )
+  const targetValues = target.getValues()
+  source.getValues().forEach((row, i) => {
+    targetValues[i * 2 + 1] = [...row]
   })
-
-  targetRange.setRichTextValues(targetRichText.map(row => row.map(rt => rt ?? emptyRichText)))
+  target.setValues(targetValues)
 }
 
 
-function syncLyricsFromChordSheet(range: Range): void {
-  const sourceSheet = LYRICS_SHEET()
-  const sourceWorkingArea = getWorkingArea(sourceSheet)
-
-  const targetSheet = range.getSheet()
-  const targetWorkingArea = getWorkingArea(targetSheet)
-
-  const intersected = targetWorkingArea.intersect(range)
-  if (!intersected) return
-
-  const targetStartsAtChordRow = (intersected.getRow() - targetWorkingArea.getRow()) % 2 === 0
-  if (targetStartsAtChordRow && intersected.getNumRows() === 1) return
-
-  const targetRange = targetStartsAtChordRow
-    ? intersected.translate(0, 1).resize(0, -1)
-    : intersected
-
-  const sourceRange = targetRange
-    .projectInto(sourceSheet)
-    .scale(1, 0.5)
-    .translate(
-      sourceWorkingArea.getColumn() - targetWorkingArea.getColumn(),
-      sourceWorkingArea.getRow() - targetWorkingArea.getRow() - Math.ceil((targetRange.getRow() - targetWorkingArea.getRow()) / 2)
-    )
-    .intersect(sourceWorkingArea)
-
-  if (!sourceRange) return
-
-  const blackText = SpreadsheetApp.newTextStyle().setForegroundColor("#000000").build()
-
-  const sourceRichText = sourceRange.getRichTextValues()
-  const targetRichText = targetRange.getRichTextValues()
-
-  const emptyRichText = SpreadsheetApp.newRichTextValue().setText("").build()
-
-  sourceRichText.forEach((sourceRow, rowOffset) => {
-    targetRichText[rowOffset * 2] = sourceRow.map(rt =>
-      rt?.getText() ? rt.copy().setTextStyle(0, rt.getText().length, blackText).build() : emptyRichText
-    )
-  })
-
-  targetRange
-    .resizeTo(sourceRange.getNumColumns(), targetRange.getNumRows())
-    .setRichTextValues(targetRichText.map(row => row.slice(0, sourceRange.getNumColumns()).map(rt => rt ?? emptyRichText)))
+export function syncLyricsFromChordSheet(changed: Area): void {
+  syncLyricsToChordSheet(
+    $.Chords.main.area
+      .intersect(changed)
+      .relativeTo($.Chords.main)
+      .scale({ y: 0.5 })
+      .translate($.Lyrics.main)
+  )
 }
 
-function handleKeyChange(range: Range, oldValue: string | undefined): void {
-  const keyRange = SPREADSHEET().getRangeByName(KEY_RANGE_NAME)
-  if (!keyRange?.overlapsWith(range)) return
+function restoreIndexes(changed: Area): void {
+  const changedColumns = $.Lyrics.indexColumn.sub(area => area.intersect(changed))
+  if (!changedColumns.isEmpty) {
+    changedColumns.setValues(Array.from({ length: changedColumns.height }, (_, i) => [changedColumns.y + i + 1]))
+  }
 
-  const autoTranspose = SPREADSHEET().getRangeByName(AUTOTRANSPOSE_RANGE_NAME)?.getValue()
-  if (autoTranspose) {
-    const newKey = Chord.parse(keyRange.getValue() ?? "")
-    const oldKey = Chord.parse(oldValue ?? "")
+  const changedRows = $.Lyrics.indexRow.sub(area => area.intersect(changed))
+  if (!changedRows.isEmpty) {
+    changedRows.setValues([Array.from({ length: changedRows.width }, (_, i) => changedRows.x + i + 1)])
+  }
+}
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// KEY CHANGE
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+function handleKeyChange(changed: Area, oldValue: CellValue): void {
+  const key = $.Chords.key
+  if (!key.area.overlapsWith(changed)) return
+
+  if ($.Chords.autotranspose.getValue()) {
+    const newKey = Chord.parse(key.getValue() ?? "")
+    const oldKey = Chord.parse(String(oldValue))
     newKey && oldKey && transposeAll(oldKey.semitonesTo(newKey), false)
   }
 }
 
-function disableAutoTransposeIfKeyIsInvalid(editedRange: Range): void {
-  const keyRange = SPREADSHEET().getRangeByName(KEY_RANGE_NAME)
-  const autoTransposeRange = SPREADSHEET().getRangeByName(AUTOTRANSPOSE_RANGE_NAME)
-
-  if (!keyRange?.overlapsWith(editedRange) && !autoTransposeRange?.overlapsWith(editedRange)) return
-  if (!autoTransposeRange?.getValue()) return
-
-  const key = Chord.parse(keyRange?.getValue() ?? "")
-  if (!key) autoTransposeRange.setValue(false)
+function disableAutoTransposeIfKeyIsInvalid(changed: Area): void {
+  const key = $.Chords.key
+  const autotranspose = $.Chords.autotranspose
+  if (!key.area.overlapsWith(changed) && !autotranspose.area.overlapsWith(changed)) return
+  if (autotranspose.getValue() && !Chord.parse(key.getValue() ?? "")) autotranspose.setValue(false)
 }
-
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-// ACTIONS
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 export function transposeUp(): void { transposeAll(1) }
 
 export function transposeDown(): void { transposeAll(-1) }
 
-function markAsInvalid(value: unknown): string {
-  const str = String(value)
-  return str.startsWith("!") ? str : "!" + str
-}
-
+function markAsInvalid(value: string): string { return value.startsWith("!") ? value : "!" + value }
 
 function transposeAll(semitones: number, updateKey: boolean = true): void {
   if (semitones === 0) return
 
   if (updateKey) {
-    const keyRange = SPREADSHEET().getRangeByName(KEY_RANGE_NAME)
-    const key = keyRange && Chord.parse(keyRange.getValue())
-
-    keyRange?.setValue(key?.transpose(semitones).toString() ?? markAsInvalid(keyRange.getValue()))
+    const key = $.Chords.key.getValue()
+    $.Chords.key.setValue(Chord.parse(key)?.transpose(semitones).toString() ?? markAsInvalid(key))
   }
 
-  const range = getWorkingArea(CHORDS_SHEET()).intersect(CHORDS_SHEET().getDataRange())
-  if (!range) return
-
-  const values = range.getValues()
+  const values = $.Chords.main.getValues()
   values.forEach((row, rowIndex) => {
     if (rowIndex % 2 === 1) return
-    values[rowIndex] = row.map(cell => cell && (Chord.parse(`${cell}`)?.transpose(semitones).toString() ?? markAsInvalid(cell)))
+    values[rowIndex] = row.map(cell => {
+      if (!cell) return null
+      const chord = String(cell)
+      return Chord.parse(chord)?.transpose(semitones).toString() ?? markAsInvalid(chord)
+    })
   })
-  range.setValues(values)
+  $.Chords.main.setValues(values)
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// SETUP
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 export function resetFormatting(): void {
+  $.ALL.forEach(space => {
+    const mainStart = space.main.x + 1
 
-  SPREADSHEET().getSheets().forEach(sheet => {
-    const workingArea = getWorkingArea(sheet)
-    const isPrintSheet = sheet.getName() === PRINT_SHEET_NAME
-
-    for (let columnIndex = 1; columnIndex <= sheet.getMaxColumns(); columnIndex++) {
-      const effectiveColumnIndex = columnIndex
-      const columnWidth = effectiveColumnIndex < workingArea.getColumn()
+    for (let columnIndex = 1; columnIndex <= space.width; columnIndex++) {
+      const columnWidth = columnIndex < mainStart
         ? WIDE_COLUMN_WIDTH + 2 * PADDING
-        : effectiveColumnIndex === workingArea.getColumn()
+        : columnIndex === mainStart
           ? WIDE_COLUMN_WIDTH + PADDING
-          : (effectiveColumnIndex - workingArea.getColumn()) % WIDE_COLUMN_PERIODICITY === 0
+          : (columnIndex - mainStart) % WIDE_COLUMN_PERIODICITY === 0
             ? WIDE_COLUMN_WIDTH
             : NORMAL_COLUMN_WIDTH
 
-      sheet.setColumnWidth(columnIndex, columnWidth)
+      space.sheet.setColumnWidth(columnIndex, columnWidth)
     }
 
-
-
-    sheet.getDataRange().setFontFamily(FONT_FAMILY)
-    if (!isPrintSheet) {
-      const maxRow = sheet.getMaxRows()
-      if (maxRow >= 1) {
-        sheet.setRowHeights(1, maxRow, ROW_HEIGHT)
+    space.range?.setFontFamily(FONT_FAMILY)
+    if (space !== $.Print) {
+      if (space.height >= 1) {
+        space.sheet.setRowHeights(1, space.height, ROW_HEIGHT)
       }
-      sheet.getDataRange().setFontSize(FONT_SIZE)
+      space.range?.setFontSize(FONT_SIZE)
     }
   })
 }
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-// TRIGGER SETUP
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-
-function createMissingTriggerWarning(): void {
-  if (PropertiesService.getDocumentProperties().getProperty(TRIGGERS_INSTALLED_PROPERTY)) return
-
-  SpreadsheetApp.getUi()
-    .createMenu("⚠️")
-    .addItem("Autorizar la extensión para habilitar la sincronización de texto avanzada", setupTriggers.name)
-    .addToUi()
-}
-
 function setupTriggers(): void {
-  if (
-    ScriptApp.getProjectTriggers().some(trigger =>
-      trigger.getHandlerFunction() === onChange.name && trigger.getEventType() === ScriptApp.EventType.ON_CHANGE
-    )
-  ) return info("Trigger setup", `${onChange.name} trigger already installed`)
-
   try {
+    if (
+      ScriptApp.getProjectTriggers().some(trigger =>
+        trigger.getHandlerFunction() === onChange.name && trigger.getEventType() === ScriptApp.EventType.ON_CHANGE
+      )
+    ) return info("Trigger setup", `${onChange.name} trigger already installed`)
+
     ScriptApp.newTrigger(onChange.name)
-      .forSpreadsheet(SPREADSHEET())
+      .forSpreadsheet($.SPREADSHEET)
       .onChange()
       .create()
 
     PropertiesService.getDocumentProperties().setProperty(TRIGGERS_INSTALLED_PROPERTY, "true")
 
     success("Trigger setup", `${onChange.name} trigger installed successfully`)
+
   } catch (e) {
     error("Trigger setup failed", e instanceof Error ? e.message : `${e}`)
   }
@@ -335,104 +270,93 @@ function setupTriggers(): void {
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 export type StructuralChange = {
-  type: "insertion" | "deletion"
   position: number
   span: number
 }
 
 export function popColumnIndexes(): (number | null)[] {
-  const sheet = LYRICS_SHEET()
-  const indexRange = sheet.getRange(1, 1, 1, sheet.getMaxColumns())
-
-  const currentValues = indexRange.getValues()[0]
-  indexRange.setValues([currentValues.map((_, i) => i + 1)])
-
+  const currentValues = $.Lyrics.indexRow.getValues()[0]
+  $.Lyrics.indexRow.setValues([currentValues.map((_, i) => i + 1)])
   return currentValues.map(v => typeof v === "number" && v > 0 ? v : null)
 }
 
 export function popRowIndexes(): (number | null)[] {
-  const sheet = LYRICS_SHEET()
-  const indexRange = sheet.getRange(1, 1, sheet.getMaxRows(), 1)
-
-  const currentValues = indexRange.getValues()
-  indexRange.setValues(currentValues.map((_, i) => [i + 1]))
-
+  const currentValues = $.Lyrics.indexColumn.getValues()
+  $.Lyrics.indexColumn.setValues(currentValues.map((_, i) => [i + 1]))
   return currentValues.map(([v]) => typeof v === "number" && v > 0 ? v : null)
 }
 
-export function detectChanges(indexes: (number | null)[], workingAreaStart: number, workingAreaEnd: number): StructuralChange[] {
+export function detectChanges(indexes: (number | null)[], from: number, to: number): StructuralChange[] {
   const changes: StructuralChange[] = []
+  let i = indexes.length - 1
 
-  for (let i = indexes.length - 1; i >= 0; i--) {
+  while (i >= 0) {
     const current = indexes[i]
-    const previous = indexes[i - 1]
 
     if (current === null) {
-      const afterNulls = i
-      let span = 1
-      while (i > 0 && indexes[i - 1] === null) {
-        span++
-        i--
-      }
-      const firstAfterNulls = indexes[afterNulls + 1]
+      const nullEnd = i
+      while (i > 0 && indexes[i - 1] === null) i--
+      const span = nullEnd - i + 1
+
       const position = i > 0
         ? indexes[i - 1]! + 1
-        : firstAfterNulls ?? 1
+        : indexes[nullEnd + 1] ?? 1
 
-      if (position >= workingAreaStart && position <= workingAreaEnd + span) {
-        const clampedStart = Math.max(position, workingAreaStart)
-        const clampedEnd = Math.min(position + span - 1, workingAreaEnd + span - 1)
-        const clampedSpan = clampedEnd - clampedStart + 1
-        if (clampedSpan > 0) {
-          changes.push({ type: "insertion", position: clampedStart - workingAreaStart + 1, span: clampedSpan })
+      if (position >= from && position <= to + span) {
+        const clampedStart = Math.max(position, from)
+        const clampedEnd = Math.min(position + span - 1, to + span - 1)
+        if (clampedEnd >= clampedStart) {
+          changes.push({ position: clampedStart - from + 1, span: clampedEnd - clampedStart + 1 })
         }
       }
     } else {
+      const previous = indexes[i - 1]
       const expected = i > 0 ? (previous ?? current) + 1 : 1
       const gap = current - expected
-      if (gap > 0 && expected <= workingAreaEnd && expected + gap > workingAreaStart) {
-        const clampedStart = Math.max(expected, workingAreaStart)
-        const clampedEnd = Math.min(expected + gap - 1, workingAreaEnd)
-        const clampedSpan = clampedEnd - clampedStart + 1
-        if (clampedSpan > 0) {
-          changes.push({ type: "deletion", position: clampedStart - workingAreaStart + 1, span: clampedSpan })
+
+      if (gap > 0 && expected <= to && expected + gap > from) {
+        const clampedStart = Math.max(expected, from)
+        const clampedEnd = Math.min(expected + gap - 1, to)
+        if (clampedEnd >= clampedStart) {
+          changes.push({ position: clampedStart - from + 1, span: -(clampedEnd - clampedStart + 1) })
         }
       }
     }
+
+    i--
   }
 
   return changes
 }
 
-export function applyStructuralColumnChanges(values: unknown[][], changes: StructuralChange[]): unknown[][] {
+export function applyStructuralColumnChanges(values: CellValue[][], changes: StructuralChange[]): CellValue[][] {
   const result = values.map(row => [...row])
 
-  for (const change of changes) {
-    const index = change.position - 1
-    if (change.type === "insertion") {
-      result.forEach(row => row.splice(index, 0, ...Array(change.span).fill("")))
+  for (const { position, span } of changes) {
+    const index = position - 1
+    if (span > 0) {
+      result.forEach(row => row.splice(index, 0, ...Array(span).fill("")))
     } else {
-      result.forEach(row => row.splice(index, change.span))
+      result.forEach(row => row.splice(index, -span))
     }
   }
 
   return result
 }
 
-export function applyStructuralRowChanges(values: unknown[][], changes: StructuralChange[]): unknown[][] {
+export function applyStructuralRowChanges(values: CellValue[][], changes: StructuralChange[]): CellValue[][] {
   const result = values.map(row => [...row])
   if (result.length === 0) return result
 
   const rowWidth = result[0].length
 
-  for (const change of changes) {
-    const index = (change.position - 1) * 2
-    const span = change.span * 2
-    if (change.type === "insertion") {
-      const emptyRows = Array.from({ length: span }, () => Array(rowWidth).fill(""))
-      result.splice(index, 0, ...emptyRows)
+  for (const { position, span } of changes) {
+    const index = (position - 1) * 2
+    const scaledSpan = span * 2
+    if (scaledSpan > 0) {
+      result.splice(index, 0, ...Array.from({ length: scaledSpan }, () => Array(rowWidth).fill("")))
     } else {
-      result.splice(index, span)
+      result.splice(index, -scaledSpan)
     }
   }
 
@@ -442,58 +366,39 @@ export function applyStructuralRowChanges(values: unknown[][], changes: Structur
 function syncStructuralColumnChanges(changes: StructuralChange[]): void {
   if (!changes.length) return
 
-  const workingArea = getWorkingArea(CHORDS_SHEET())
+  const newValues = applyStructuralColumnChanges($.Chords.main.getValues(), changes)
 
-  const newValues = applyStructuralColumnChanges(workingArea.getValues(), changes)
-  const newWidth = newValues[0]?.length ?? 0
-
-  if (newWidth > 0) {
-    workingArea.resizeTo(newWidth, newValues.length)
-      .setValues(newValues)
-  }
+  $.Chords.main
+    .sub(area => area.resizeTo({ x: newValues[0].length, y: newValues.length }))
+    .setValues(newValues)
 }
 
 function syncStructuralRowChanges(changes: StructuralChange[]): void {
   if (!changes.length) return
 
-  const workingArea = getWorkingArea(CHORDS_SHEET())
+  const newValues = applyStructuralRowChanges($.Chords.main.getValues(), changes)
+  const targetHeight = $.Lyrics.getLastRowWithContent() * 2
 
-  const newValues = applyStructuralRowChanges(workingArea.getValues(), changes)
-  const newWidth = newValues[0]?.length ?? 0
-
-  const lyricsContentHeight = findLastRowWithContent(getWorkingArea(LYRICS_SHEET()).getValues())
-  const targetContentHeight = lyricsContentHeight * 2
-
-  if (targetContentHeight > 0 && newWidth > 0) {
-    workingArea
-      .resizeTo(newWidth, targetContentHeight)
-      .setValues(newValues.slice(0, targetContentHeight))
-  }
+  $.Chords.main
+    .sub(area => area.resizeTo({ x: newValues[0].length, y: targetHeight }))
+    .setValues(newValues.slice(0, targetHeight))
 }
 
 function enforceChordWidth(): void {
-  const chordsSheet = CHORDS_SHEET()
-  const lyricsWorkingAreaWidth = getWorkingArea(LYRICS_SHEET()).getNumColumns()
+  const targetMaxColumns = Math.max($.Chords.frozenColumns.width + $.Lyrics.main.width, $.Chords.header.width)
+  const excess = $.Chords.width - targetMaxColumns
 
-  const frozenColumns = chordsSheet.getFrozenColumns()
-  const headerWidth = SPREADSHEET().getRangeByName(CHORDS_HEADER_RANGE_NAME)?.getNumColumns() ?? frozenColumns
-  const targetMaxColumns = Math.max(frozenColumns + lyricsWorkingAreaWidth, headerWidth)
-  const currentMaxColumns = chordsSheet.getMaxColumns()
-
-  if (currentMaxColumns > targetMaxColumns) {
-    chordsSheet.deleteColumns(targetMaxColumns + 1, currentMaxColumns - targetMaxColumns)
+  if (excess > 0) {
+    $.Chords.sheet.deleteColumns(targetMaxColumns + 1, excess)
   }
 }
 
 function enforceChordHeight(): void {
-  const chordsSheet = CHORDS_SHEET()
-  const contentHeight = findLastRowWithContent(getWorkingArea(LYRICS_SHEET()).getValues())
+  const targetMaxRows = $.Chords.frozenRows.height + Math.max($.Lyrics.getLastRowWithContent() * 2, 1)
+  const excess = $.Chords.height - targetMaxRows
 
-  const targetMaxRows = chordsSheet.getFrozenRows() + Math.max(contentHeight * 2, 1)
-  const currentMaxRows = chordsSheet.getMaxRows()
-
-  if (currentMaxRows > targetMaxRows) {
-    chordsSheet.deleteRows(targetMaxRows + 1, currentMaxRows - targetMaxRows)
+  if (excess > 0) {
+    $.Chords.sheet.deleteRows(targetMaxRows + 1, excess)
   }
 }
 
@@ -620,7 +525,7 @@ export function regeneratePrint(): void {
     }
   }
 
-  let printSheet = spreadsheet.getSheetByName(PRINT_SHEET_NAME)
+  let printSheet = spreadsheet.getSheetByName(_PRINT_SHEET_NAME)
   if (printSheet) {
     const rows = printSheet.getMaxRows()
     const cols = printSheet.getMaxColumns()
@@ -628,7 +533,7 @@ export function regeneratePrint(): void {
     if (cols > 1) printSheet.deleteColumns(2, cols - 1)
     printSheet.clear()
   } else {
-    printSheet = spreadsheet.insertSheet(PRINT_SHEET_NAME, spreadsheet.getNumSheets())
+    printSheet = spreadsheet.insertSheet(_PRINT_SHEET_NAME, spreadsheet.getNumSheets())
   }
 
   printSheet.insertRows(1, PRINT_PAGE_HEIGHT - 1)
@@ -651,7 +556,7 @@ export function regeneratePrint(): void {
 
 function generatePrintHeader(printSheet: Sheet): void {
   const author = String(SPREADSHEET().getRangeByName(AUTHOR_RANGE_NAME)?.getValue() ?? "")
-  const key = String(SPREADSHEET().getRangeByName(KEY_RANGE_NAME)?.getValue() ?? "")
+  const key = String(SPREADSHEET().getRangeByName(_KEY_RANGE_NAME)?.getValue() ?? "")
   const tempo = String(SPREADSHEET().getRangeByName(TEMPO_RANGE_NAME)?.getValue() ?? "")
   const notes = String(SPREADSHEET().getRangeByName(NOTES_RANGE_NAME)?.getValue() ?? "")
 
@@ -858,27 +763,20 @@ const getSheet = (sheetName: string) => (): Sheet => {
   return sheet
 }
 
-const LYRICS_SHEET = getSheet(LYRICS_SHEET_NAME)
-const CHORDS_SHEET = getSheet(CHORDS_SHEET_NAME)
+const LYRICS_SHEET = getSheet(_LYRICS_SHEET_NAME)
+const CHORDS_SHEET = getSheet(_CHORDS_SHEET_NAME)
 
 
 function getWorkingArea(sheet: Sheet): Range {
   const frozenRows = sheet.getFrozenRows()
   const frozenColumns = sheet.getFrozenColumns()
-  const rightTrayWidth = sheet.getName() === LYRICS_SHEET_NAME
-    ? SPREADSHEET().getRangeByName(LYRICS_RIGHT_TRAY_RANGE_NAME)?.getNumColumns() ?? 0
+  const rightTrayWidth = sheet.getName() === _LYRICS_SHEET_NAME
+    ? SPREADSHEET().getRangeByName(_LYRICS_RIGHT_TRAY_RANGE_NAME)?.getNumColumns() ?? 0
     : 0
 
   return sheet.fullRange()
     .resize(-frozenColumns - rightTrayWidth, -frozenRows)
     .translate(frozenColumns, frozenRows)
-}
-
-function findLastRowWithContent(values: unknown[][]): number {
-  for (let i = values.length - 1; i >= 0; i--) {
-    if (values[i].some(cell => cell !== "")) return i + 1
-  }
-  return 0
 }
 
 const toast = (icon: string) => (title = "", message = "") => {

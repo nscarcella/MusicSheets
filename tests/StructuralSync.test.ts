@@ -11,7 +11,7 @@ vi.stubGlobal("SpreadsheetApp", {
   getActive: () => ({ getSheetByName: () => mockSheet })
 })
 
-const { detectChanges, applyStructuralColumnChanges, applyStructuralRowChanges } = await import("../src/MusicSheet")
+const { detectChanges, applyStructuralColumnChanges: applyStructuralColumnChanges, applyStructuralRowChanges: applyStructuralRowChanges } = await import("../src/MusicSheet")
 
 describe("detectChanges", () => {
   describe("no changes", () => {
@@ -32,43 +32,43 @@ describe("detectChanges", () => {
     it("should detect single insertion at the start", () => {
       const changes = detectChanges([null, 1, 2, 3], 1, 4)
       expect(changes).toEqual([
-        { type: "insertion", position: 1, span: 1 }
+        { position: 1, span: 1 }
       ])
     })
 
     it("should detect single insertion in the middle", () => {
       const changes = detectChanges([1, 2, null, 3, 4], 1, 5)
       expect(changes).toEqual([
-        { type: "insertion", position: 3, span: 1 }
+        { position: 3, span: 1 }
       ])
     })
 
     it("should detect single insertion at the end", () => {
       const changes = detectChanges([1, 2, 3, null], 1, 4)
       expect(changes).toEqual([
-        { type: "insertion", position: 4, span: 1 }
+        { position: 4, span: 1 }
       ])
     })
 
     it("should detect multiple consecutive insertions as single change", () => {
       const changes = detectChanges([1, 2, null, null, null, 3, 4], 1, 7)
       expect(changes).toEqual([
-        { type: "insertion", position: 3, span: 3 }
+        { position: 3, span: 3 }
       ])
     })
 
     it("should detect multiple separate insertions (ordered for right-to-left processing)", () => {
       const changes = detectChanges([1, null, 2, null, 3], 1, 5)
       expect(changes).toEqual([
-        { type: "insertion", position: 3, span: 1 },
-        { type: "insertion", position: 2, span: 1 }
+        { position: 3, span: 1 },
+        { position: 2, span: 1 }
       ])
     })
 
     it("should detect consecutive insertions at the start", () => {
       const changes = detectChanges([null, null, 1, 2], 1, 4)
       expect(changes).toEqual([
-        { type: "insertion", position: 1, span: 2 }
+        { position: 1, span: 2 }
       ])
     })
 
@@ -76,7 +76,7 @@ describe("detectChanges", () => {
       // Full indexes: [1, 2, null, 3, 4, 5], frozen=2, working area columns 3-6
       const changes = detectChanges([1, 2, null, 3, 4, 5], 3, 6)
       expect(changes).toEqual([
-        { type: "insertion", position: 1, span: 1 }
+        { position: 1, span: 1 }
       ])
     })
 
@@ -84,7 +84,7 @@ describe("detectChanges", () => {
       // Full indexes: [1, 2, null, null, 5, 6], frozen=2, working area columns 3-6
       const changes = detectChanges([1, 2, null, null, 5, 6], 3, 6)
       expect(changes).toEqual([
-        { type: "insertion", position: 1, span: 2 }
+        { position: 1, span: 2 }
       ])
     })
   })
@@ -93,36 +93,36 @@ describe("detectChanges", () => {
     it("should detect single deletion at the start", () => {
       const changes = detectChanges([2, 3, 4], 1, 3)
       expect(changes).toEqual([
-        { type: "deletion", position: 1, span: 1 }
+        { position: 1, span: -1 }
       ])
     })
 
     it("should detect single deletion in the middle", () => {
       const changes = detectChanges([1, 2, 4, 5], 1, 4)
       expect(changes).toEqual([
-        { type: "deletion", position: 3, span: 1 }
+        { position: 3, span: -1 }
       ])
     })
 
     it("should detect multiple consecutive deletions as single change", () => {
       const changes = detectChanges([1, 2, 6, 7], 1, 7)
       expect(changes).toEqual([
-        { type: "deletion", position: 3, span: 3 }
+        { position: 3, span: -3 }
       ])
     })
 
     it("should detect multiple separate deletions (ordered for right-to-left processing)", () => {
       const changes = detectChanges([1, 3, 5], 1, 5)
       expect(changes).toEqual([
-        { type: "deletion", position: 4, span: 1 },
-        { type: "deletion", position: 2, span: 1 }
+        { position: 4, span: -1 },
+        { position: 2, span: -1 }
       ])
     })
 
     it("should detect deletion of all but first element", () => {
       const changes = detectChanges([1, 10], 1, 10)
       expect(changes).toEqual([
-        { type: "deletion", position: 2, span: 8 }
+        { position: 2, span: -8 }
       ])
     })
   })
@@ -157,14 +157,14 @@ describe("detectChanges", () => {
     it("should handle all nulls (all new columns)", () => {
       const changes = detectChanges([null, null, null], 1, 3)
       expect(changes).toEqual([
-        { type: "insertion", position: 1, span: 3 }
+        { position: 1, span: 3 }
       ])
     })
 
     it("should handle single null", () => {
       const changes = detectChanges([null], 1, 1)
       expect(changes).toEqual([
-        { type: "insertion", position: 1, span: 1 }
+        { position: 1, span: 1 }
       ])
     })
   })
@@ -179,7 +179,7 @@ describe("applyStructuralColumnChanges", () => {
   describe("insertions", () => {
     it("should insert column at the start", () => {
       const result = applyStructuralColumnChanges(sampleValues, [
-        { type: "insertion", position: 1, span: 1 }
+        { position: 1, span: 1 }
       ])
       expect(result).toEqual([
         ["", "A", "B", "C", "D"],
@@ -189,7 +189,7 @@ describe("applyStructuralColumnChanges", () => {
 
     it("should insert column in the middle", () => {
       const result = applyStructuralColumnChanges(sampleValues, [
-        { type: "insertion", position: 3, span: 1 }
+        { position: 3, span: 1 }
       ])
       expect(result).toEqual([
         ["A", "B", "", "C", "D"],
@@ -199,7 +199,7 @@ describe("applyStructuralColumnChanges", () => {
 
     it("should insert column at the end", () => {
       const result = applyStructuralColumnChanges(sampleValues, [
-        { type: "insertion", position: 5, span: 1 }
+        { position: 5, span: 1 }
       ])
       expect(result).toEqual([
         ["A", "B", "C", "D", ""],
@@ -209,7 +209,7 @@ describe("applyStructuralColumnChanges", () => {
 
     it("should insert multiple consecutive columns", () => {
       const result = applyStructuralColumnChanges(sampleValues, [
-        { type: "insertion", position: 2, span: 3 }
+        { position: 2, span: 3 }
       ])
       expect(result).toEqual([
         ["A", "", "", "", "B", "C", "D"],
@@ -221,7 +221,7 @@ describe("applyStructuralColumnChanges", () => {
   describe("deletions", () => {
     it("should delete column at the start", () => {
       const result = applyStructuralColumnChanges(sampleValues, [
-        { type: "deletion", position: 1, span: 1 }
+        { position: 1, span: -1 }
       ])
       expect(result).toEqual([
         ["B", "C", "D"],
@@ -231,7 +231,7 @@ describe("applyStructuralColumnChanges", () => {
 
     it("should delete column in the middle", () => {
       const result = applyStructuralColumnChanges(sampleValues, [
-        { type: "deletion", position: 2, span: 1 }
+        { position: 2, span: -1 }
       ])
       expect(result).toEqual([
         ["A", "C", "D"],
@@ -241,7 +241,7 @@ describe("applyStructuralColumnChanges", () => {
 
     it("should delete column at the end", () => {
       const result = applyStructuralColumnChanges(sampleValues, [
-        { type: "deletion", position: 4, span: 1 }
+        { position: 4, span: -1 }
       ])
       expect(result).toEqual([
         ["A", "B", "C"],
@@ -251,7 +251,7 @@ describe("applyStructuralColumnChanges", () => {
 
     it("should delete multiple consecutive columns", () => {
       const result = applyStructuralColumnChanges(sampleValues, [
-        { type: "deletion", position: 2, span: 2 }
+        { position: 2, span: -2 }
       ])
       expect(result).toEqual([
         ["A", "D"],
@@ -263,8 +263,8 @@ describe("applyStructuralColumnChanges", () => {
   describe("multiple changes", () => {
     it("should apply multiple changes right-to-left", () => {
       const result = applyStructuralColumnChanges(sampleValues, [
-        { type: "insertion", position: 4, span: 1 },
-        { type: "deletion", position: 2, span: 1 }
+        { position: 4, span: 1 },
+        { position: 2, span: -1 }
       ])
       expect(result).toEqual([
         ["A", "C", "", "D"],
@@ -282,7 +282,7 @@ describe("applyStructuralColumnChanges", () => {
 
     it("should handle empty values array", () => {
       const result = applyStructuralColumnChanges([], [
-        { type: "insertion", position: 1, span: 1 }
+        { position: 1, span: 1 }
       ])
       expect(result).toEqual([])
     })
@@ -290,7 +290,7 @@ describe("applyStructuralColumnChanges", () => {
     it("should not mutate original values", () => {
       const original = [["A", "B"], ["1", "2"]]
       applyStructuralColumnChanges(original, [
-        { type: "deletion", position: 1, span: 1 }
+        { position: 1, span: -1 }
       ])
       expect(original).toEqual([["A", "B"], ["1", "2"]])
     })
@@ -308,7 +308,7 @@ describe("applyStructuralRowChanges", () => {
   describe("insertions (with 2x scaling)", () => {
     it("should insert 2 rows at the start for 1 lyrics row", () => {
       const result = applyStructuralRowChanges(sampleValues, [
-        { type: "insertion", position: 1, span: 1 }
+        { position: 1, span: 1 }
       ])
       expect(result).toEqual([
         ["", "", ""],
@@ -322,7 +322,7 @@ describe("applyStructuralRowChanges", () => {
 
     it("should insert 2 rows in the middle for 1 lyrics row", () => {
       const result = applyStructuralRowChanges(sampleValues, [
-        { type: "insertion", position: 2, span: 1 }
+        { position: 2, span: 1 }
       ])
       expect(result).toEqual([
         ["A", "B", "C"],
@@ -336,7 +336,7 @@ describe("applyStructuralRowChanges", () => {
 
     it("should insert 4 rows for 2 lyrics rows", () => {
       const result = applyStructuralRowChanges(sampleValues, [
-        { type: "insertion", position: 2, span: 2 }
+        { position: 2, span: 2 }
       ])
       expect(result).toEqual([
         ["A", "B", "C"],
@@ -352,7 +352,7 @@ describe("applyStructuralRowChanges", () => {
 
     it("should insert 2 rows at the end for 1 lyrics row", () => {
       const result = applyStructuralRowChanges(sampleValues, [
-        { type: "insertion", position: 3, span: 1 }
+        { position: 3, span: 1 }
       ])
       expect(result).toEqual([
         ["A", "B", "C"],
@@ -368,7 +368,7 @@ describe("applyStructuralRowChanges", () => {
   describe("deletions (with 2x scaling)", () => {
     it("should delete 2 rows at the start for 1 lyrics row", () => {
       const result = applyStructuralRowChanges(sampleValues, [
-        { type: "deletion", position: 1, span: 1 }
+        { position: 1, span: -1 }
       ])
       expect(result).toEqual([
         ["D", "E", "F"],
@@ -386,7 +386,7 @@ describe("applyStructuralRowChanges", () => {
         ["7", "8", "9"]
       ]
       const result = applyStructuralRowChanges(sixRowValues, [
-        { type: "deletion", position: 2, span: 1 }
+        { position: 2, span: -1 }
       ])
       expect(result).toEqual([
         ["A", "B", "C"],
@@ -406,7 +406,7 @@ describe("applyStructuralRowChanges", () => {
         ["7", "8", "9"]
       ]
       const result = applyStructuralRowChanges(sixRowValues, [
-        { type: "deletion", position: 1, span: 2 }
+        { position: 1, span: -2 }
       ])
       expect(result).toEqual([
         ["G", "H", "I"],
@@ -426,8 +426,8 @@ describe("applyStructuralRowChanges", () => {
         ["7", "8", "9"]
       ]
       const result = applyStructuralRowChanges(sixRowValues, [
-        { type: "insertion", position: 3, span: 1 },
-        { type: "deletion", position: 1, span: 1 }
+        { position: 3, span: 1 },
+        { position: 1, span: -1 }
       ])
       expect(result).toEqual([
         ["D", "E", "F"],
@@ -449,7 +449,7 @@ describe("applyStructuralRowChanges", () => {
 
     it("should handle empty values array", () => {
       const result = applyStructuralRowChanges([], [
-        { type: "insertion", position: 1, span: 1 }
+        { position: 1, span: 1 }
       ])
       expect(result).toEqual([])
     })
@@ -457,7 +457,7 @@ describe("applyStructuralRowChanges", () => {
     it("should not mutate original values", () => {
       const original = [["A", "B"], ["1", "2"]]
       applyStructuralRowChanges(original, [
-        { type: "deletion", position: 1, span: 1 }
+        { position: 1, span: -1 }
       ])
       expect(original).toEqual([["A", "B"], ["1", "2"]])
     })

@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Google Apps Script for music chord sheets with auto-transposition",
   "scripts": {
-    "build": "tsc && node scripts/post-build.js && cp appsscript.json dist/appsscript.json",
+    "build": "rm -rf dist && tsc && node scripts/post-build.js && cp appsscript.json dist/appsscript.json",
     "prepush": "npm run test && npm run lint:fix",
     "push": "npm run prepush && npm run build && clasp push",
     "deploy": "npm run push && clasp deploy",

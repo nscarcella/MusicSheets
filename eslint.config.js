@@ -39,6 +39,7 @@ export default defineConfig(
 			"quotes": ["warn", "double", { avoidEscape: true }],
 			"@typescript-eslint/no-namespace": "off",
 			"@typescript-eslint/no-unused-expressions": "off",
+			"@typescript-eslint/no-unsafe-function-type": "off",
 			"@stylistic/no-extra-parens": ["warn", "all", { nestedBinaryExpressions: false }],
 			"@stylistic/member-delimiter-style": [
 				"warn",
