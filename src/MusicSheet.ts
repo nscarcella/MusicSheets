@@ -6,7 +6,7 @@ type OnEdit = GoogleAppsScript.Events.SheetsOnEdit
 type OnChange = GoogleAppsScript.Events.SheetsOnChange
 
 
-const VERSION = "1.0"
+const VERSION = "2.0"
 
 const FONT_FAMILY = "Space Mono"
 const FONT_SIZE = 10
@@ -69,10 +69,12 @@ export function onChange(event: OnChange): void {
     if (event.changeType === "INSERT_COLUMN" || event.changeType === "REMOVE_COLUMN") {
       syncStructuralColumnChanges(detectChanges(popColumnIndexes(), $.Lyrics.main.x + 1, $.Lyrics.main.end.x))
       enforceChordWidth()
+      syncLyricsToChordSheet()
     }
     else if (event.changeType === "INSERT_ROW" || event.changeType === "REMOVE_ROW") {
       syncStructuralRowChanges(detectChanges(popRowIndexes(), $.Lyrics.main.y + 1, $.Lyrics.height))
       enforceChordHeight()
+      syncLyricsToChordSheet()
     }
   } catch (error) {
     warn("Unexpected error in onChange hook", error instanceof Error ? error.message : undefined)
@@ -83,7 +85,7 @@ export function onChange(event: OnChange): void {
 // SYNC LYRICS
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-export function syncLyricsToChordSheet(changed: Area): void {
+export function syncLyricsToChordSheet(changed: Area = $.Lyrics.main.area): void {
   const source = $.Lyrics.main.sub(area => area.intersect(changed))
   if (source.isEmpty) return
 
