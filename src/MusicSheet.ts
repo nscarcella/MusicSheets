@@ -391,9 +391,10 @@ export function regeneratePrint(): void {
   const availableWidthPerPage = PRINT_PAGE_WIDTH - 2 * horizontalContentMargin
   const availableHeightPerPage = PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT - verticalContentMargin
 
-  const source = $.Chords.main.getValues()
+  const sourceValues = $.Chords.main.getValues()
+  const sourceRichText = $.Chords.main.getRichTextValues()
 
-  const sections = detectSectionAreas(source)
+  const sections = detectSectionAreas(sourceValues)
   if (sections.some(s => s.height > availableHeightPerPage - PRINT_HEADER_HEIGHT || s.width > availableWidthPerPage)) {
     error("Sección demasiado grande", "Una sección excede los límites de la página")
     return
@@ -412,19 +413,23 @@ export function regeneratePrint(): void {
 
   const totalPages = positions.length > 0 ? Math.floor(positions[positions.length - 1].x / PRINT_PAGE_WIDTH) + 1 : 1
   const totalColumns = totalPages * PRINT_PAGE_WIDTH
-  const target: string[][] = Array.from({ length: PRINT_PAGE_HEIGHT }, () => Array(totalColumns).fill(""))
+  const emptyRichText = SpreadsheetApp.newRichTextValue().setText("").build()
+  const targetRichText: GoogleAppsScript.Spreadsheet.RichTextValue[][] = Array.from(
+    { length: PRINT_PAGE_HEIGHT },
+    () => Array(totalColumns).fill(emptyRichText)
+  )
 
   sections.forEach((section, i) => {
     const position = positions[i]
     for (let y = 0; y < section.height; y++) {
       for (let x = 0; x < section.width; x++) {
-        target[position.y + y][position.x + x] = String(source[section.y + y]?.[section.x + x] ?? "")
+        targetRichText[position.y + y][position.x + x] = sourceRichText[section.y + y]?.[section.x + x] ?? emptyRichText
       }
     }
   })
 
   resetPrintSheet(PRINT_PAGE_HEIGHT, totalColumns)
-  $.Print.main.setValues(target)
+  $.Print.main.setRichTextValues(targetRichText)
 
   generatePrintHeader()
 
