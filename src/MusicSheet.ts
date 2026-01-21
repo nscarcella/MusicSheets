@@ -49,7 +49,7 @@ export function onEdit(event: OnEdit): void {
     switch (sheet.name) {
       case $.Lyrics.name:
         restoreIndexes(changed)
-        syncLyricsToChordSheet(changed)
+        syncLyricsToChordSheet()
         enforceChordHeight()
         break
 
@@ -96,10 +96,15 @@ export function syncLyricsToChordSheet(changed: Area = $.Lyrics.main.area): void
   )
 
   const targetValues = target.getValues()
+  const targetWeights = target.getFontWeights()
   source.getValues().forEach((row, i) => {
     targetValues[i * 2 + 1] = [...row]
   })
+  source.getFontWeights().forEach((row, i) => {
+    targetWeights[i * 2 + 1] = [...row]
+  })
   target.setValues(targetValues)
+  target.setFontWeights(targetWeights)
 }
 
 
@@ -422,6 +427,7 @@ export function regeneratePrint(): void {
   $.Print.main.setValues(target)
 
   generatePrintHeader()
+
   for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
     $.Print.pageContent(pageIndex).format({ border: true })
     generatePrintFooter(pageIndex, totalPages)

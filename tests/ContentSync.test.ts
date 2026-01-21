@@ -8,9 +8,14 @@ type SheetConfig = {
   tray?: number
 }
 
+type SheetData = {
+  values: CellValue[][]
+  weights: string[][]
+}
+
 class MockSubSpace {
   constructor(
-    private data: CellValue[][],
+    private data: SheetData,
     readonly area: Area,
   ) { }
 
@@ -19,6 +24,7 @@ class MockSubSpace {
   get width() { return this.area.width }
   get height() { return this.area.height }
   get start() { return this.area.start }
+  get isEmpty() { return this.area.isEmpty }
 
   sub(f: (area: Area) => Area): MockSubSpace {
     return new MockSubSpace(this.data, f(this.area))
@@ -26,7 +32,7 @@ class MockSubSpace {
 
   getValues(): CellValue[][] {
     if (this.area.isEmpty) return []
-    return this.data
+    return this.data.values
       .slice(this.y, this.y + this.height)
       .map(row => row.slice(this.x, this.x + this.width))
   }
@@ -35,25 +41,44 @@ class MockSubSpace {
     if (this.area.isEmpty) return
     values.forEach((row, i) => {
       row.forEach((cell, j) => {
-        this.data[this.y + i][this.x + j] = cell
+        this.data.values[this.y + i][this.x + j] = cell
+      })
+    })
+  }
+
+  getFontWeights(): string[][] {
+    if (this.area.isEmpty) return []
+    return this.data.weights
+      .slice(this.y, this.y + this.height)
+      .map(row => row.slice(this.x, this.x + this.width))
+  }
+
+  setFontWeights(weights: string[][]): void {
+    if (this.area.isEmpty) return
+    weights.forEach((row, i) => {
+      row.forEach((weight, j) => {
+        this.data.weights[this.y + i][this.x + j] = weight
       })
     })
   }
 }
 
 class MockSheetSpace {
-  private data: CellValue[][]
+  private data: SheetData
   readonly area: Area
   private frozenRowCount: number
   private frozenColCount: number
   private trayWidth: number
 
-  constructor(data: CellValue[][], config: SheetConfig) {
-    this.data = data.map(row => [...row])
+  constructor(values: CellValue[][], config: SheetConfig) {
+    this.data = {
+      values: values.map(row => [...row]),
+      weights: values.map(row => row.map(() => "normal")),
+    }
     this.frozenRowCount = config.frozen[0]
     this.frozenColCount = config.frozen[1]
     this.trayWidth = config.tray ?? 0
-    this.area = Origin.by({ x: data[0]?.length ?? 0, y: data.length })
+    this.area = Origin.by({ x: values[0]?.length ?? 0, y: values.length })
   }
 
   get main(): MockSubSpace {
@@ -77,7 +102,11 @@ class MockSheetSpace {
   }
 
   getData(): CellValue[][] {
-    return this.data.map(row => [...row])
+    return this.data.values.map(row => [...row])
+  }
+
+  getWeights(): string[][] {
+    return this.data.weights.map(row => [...row])
   }
 }
 

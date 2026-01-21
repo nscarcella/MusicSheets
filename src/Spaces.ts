@@ -4,6 +4,7 @@ import { Area, Empty, Origin, Point } from "./Area"
 type Range = GoogleAppsScript.Spreadsheet.Range
 type Sheet = GoogleAppsScript.Spreadsheet.Sheet
 type RichTextValue = GoogleAppsScript.Spreadsheet.RichTextValue
+type FontWeight = GoogleAppsScript.Spreadsheet.FontWeight
 export type CellValue = string | number | boolean | Date | null
 
 
@@ -50,8 +51,9 @@ export abstract class Space {
   abstract area: Area
   abstract sheet: Sheet
 
-  @lazy protected get range(): Range | undefined {
-    return this.area.isEmpty ? undefined : this.sheet.getRange(this.y + 1, this.x + 1, this.height, this.width)
+  @lazy protected get range(): Range {
+    if (this.area.isEmpty) throw new Error("Cannot access range of empty space")
+    return this.sheet.getRange(this.y + 1, this.x + 1, this.height, this.width)
   }
 
   get x(): number { return this.area.x }
@@ -62,22 +64,23 @@ export abstract class Space {
   get end(): Point { return this.area.end }
   get isEmpty(): boolean { return this.area.isEmpty }
 
-  getValues(): CellValue[][] { return this.range?.getValues() ?? raise(new Error("Cannot get values from empty space")) }
-  setValues(newValues: CellValue[][]): void { this.range?.setValues(newValues) ?? raise(new Error("Cannot set values on empty space")) }
+  getValues(): CellValue[][] { return this.range.getValues() }
+  setValues(newValues: CellValue[][]): void { this.range.setValues(newValues) }
 
-  getRichTextValues(): (RichTextValue | null)[][] { return this.range?.getRichTextValues() ?? raise(new Error("Cannot get rich text values from empty space")) }
-  setRichTextValues(values: RichTextValue[][]): void { this.range?.setRichTextValues(values) ?? raise(new Error("Cannot set rich text values on empty space")) }
+  getRichTextValues(): (RichTextValue | null)[][] { return this.range.getRichTextValues() }
+  setRichTextValues(values: RichTextValue[][]): void { this.range.setRichTextValues(values) }
+
+  getFontWeights(): (FontWeight | null)[][] { return this.range.getFontWeights() }
+  setFontWeights(weights: (FontWeight | null)[][]): void { this.range.setFontWeights(weights) }
 
   format(options: FormatOptions): this {
-    let range = this.range
-    if (!range) return this
-    if (options.fontFamily !== undefined) range = range.setFontFamily(options.fontFamily)
-    if (options.fontSize !== undefined) range = range.setFontSize(options.fontSize)
-    if (options.fontWeight !== undefined) range = range.setFontWeight(options.fontWeight)
-    if (options.verticalAlignment !== undefined) range = range.setVerticalAlignment(options.verticalAlignment)
-    if (options.horizontalAlignment !== undefined) range = range.setHorizontalAlignment(options.horizontalAlignment)
-    if (options.wrapStrategy !== undefined) range = range.setWrapStrategy(options.wrapStrategy)
-    if (options.border) range.setBorder(true, true, true, true, false, false)
+    if (options.fontFamily !== undefined) this.range.setFontFamily(options.fontFamily)
+    if (options.fontSize !== undefined) this.range.setFontSize(options.fontSize)
+    if (options.fontWeight !== undefined) this.range.setFontWeight(options.fontWeight)
+    if (options.verticalAlignment !== undefined) this.range.setVerticalAlignment(options.verticalAlignment)
+    if (options.horizontalAlignment !== undefined) this.range.setHorizontalAlignment(options.horizontalAlignment)
+    if (options.wrapStrategy !== undefined) this.range.setWrapStrategy(options.wrapStrategy)
+    if (options.border) this.range.setBorder(true, true, true, true, null, null)
     return this
   }
 
