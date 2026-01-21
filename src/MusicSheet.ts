@@ -293,7 +293,10 @@ export function applyStructuralColumnChanges(values: CellValue[][], changes: Str
   for (const { position, span } of changes) {
     const index = position - 1
     if (span > 0) {
-      result.forEach(row => row.splice(index, 0, ...Array(span).fill("")))
+      result.forEach(row => {
+        while (row.length < index) row.push("")
+        row.splice(index, 0, ...Array<CellValue>(span).fill(""))
+      })
     } else {
       result.forEach(row => row.splice(index, -span))
     }
@@ -307,12 +310,14 @@ export function applyStructuralRowChanges(values: CellValue[][], changes: Struct
   if (result.length === 0) return result
 
   const rowWidth = result[0].length
+  const emptyRow = () => Array<CellValue>(rowWidth).fill("")
 
   for (const { position, span } of changes) {
     const index = (position - 1) * 2
     const scaledSpan = span * 2
     if (scaledSpan > 0) {
-      result.splice(index, 0, ...Array.from({ length: scaledSpan }, () => Array(rowWidth).fill("")))
+      while (result.length < index) result.push(emptyRow())
+      result.splice(index, 0, ...Array.from({ length: scaledSpan }, emptyRow))
     } else {
       result.splice(index, -scaledSpan)
     }
@@ -336,10 +341,14 @@ function syncStructuralRowChanges(changes: StructuralChange[]): void {
 
   const newValues = applyStructuralRowChanges($.Chords.main.getValues(), changes)
   const targetHeight = $.Lyrics.getLastRowWithContent() * 2
+  const rowWidth = newValues[0]?.length ?? $.Chords.main.width
+
+  while (newValues.length < targetHeight) newValues.push(Array(rowWidth).fill(""))
+  const finalValues = newValues.slice(0, targetHeight)
 
   $.Chords.main
-    .sub(area => area.resizeTo({ x: newValues[0].length, y: targetHeight }))
-    .setValues(newValues.slice(0, targetHeight))
+    .sub(area => area.resizeTo({ x: rowWidth, y: targetHeight }))
+    .setValues(finalValues)
 }
 
 function enforceChordWidth(): void {

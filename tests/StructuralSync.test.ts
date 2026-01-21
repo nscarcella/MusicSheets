@@ -294,6 +294,27 @@ describe("applyStructuralColumnChanges", () => {
       ])
       expect(original).toEqual([["A", "B"], ["1", "2"]])
     })
+
+    it("should extend rows and insert at correct position when rows are shorter than insertion point", () => {
+      const narrowValues = [
+        ["A", "B"],
+        ["1", "2"]
+      ]
+      // Insert at position 10 → index = 9, but rows only have 2 columns
+      const result = applyStructuralColumnChanges(narrowValues, [
+        { position: 10, span: 1 }
+      ])
+
+      // Should have: 2 original + 7 padding (indices 2-8) + 1 inserted (index 9)
+      expect(result[0].length).toBe(10)
+      expect(result[0][0]).toBe("A")   // Original col 0
+      expect(result[0][1]).toBe("B")   // Original col 1
+      expect(result[0][2]).toBe("")    // Padding starts
+      expect(result[0][8]).toBe("")    // Padding ends
+      expect(result[0][9]).toBe("")    // Inserted column
+      expect(result[1][0]).toBe("1")
+      expect(result[1][9]).toBe("")
+    })
   })
 })
 
@@ -460,6 +481,27 @@ describe("applyStructuralRowChanges", () => {
         { position: 1, span: -1 }
       ])
       expect(original).toEqual([["A", "B"], ["1", "2"]])
+    })
+
+    it("should extend array and insert at correct position when array is shorter than insertion point", () => {
+      const shortValues = [
+        ["A", "B", "C"],
+        ["1", "2", "3"]
+      ]
+      // Insert at position 50 in Lyrics → index = (50-1)*2 = 98 in Chords
+      // Array has only 2 rows, so it must extend to reach index 98
+      const result = applyStructuralRowChanges(shortValues, [
+        { position: 50, span: 1 }
+      ])
+
+      // Should have: 2 original + 96 padding (indices 2-97) + 2 inserted (indices 98-99)
+      expect(result.length).toBe(100)
+      expect(result[0]).toEqual(["A", "B", "C"])   // Original row 0 preserved
+      expect(result[1]).toEqual(["1", "2", "3"])   // Original row 1 preserved
+      expect(result[2]).toEqual(["", "", ""])      // Padding starts here
+      expect(result[97]).toEqual(["", "", ""])     // Padding ends here
+      expect(result[98]).toEqual(["", "", ""])     // Inserted row (chord)
+      expect(result[99]).toEqual(["", "", ""])     // Inserted row (lyric)
     })
   })
 })
