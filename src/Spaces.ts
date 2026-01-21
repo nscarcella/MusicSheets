@@ -3,40 +3,87 @@ import { Area, Empty, Origin, Point } from "./Area"
 
 type Range = GoogleAppsScript.Spreadsheet.Range
 type Sheet = GoogleAppsScript.Spreadsheet.Sheet
+type RichTextValue = GoogleAppsScript.Spreadsheet.RichTextValue
 export type CellValue = string | number | boolean | Date | null
 
 
 const LYRICS_SHEET_NAME = "Letra"
 const CHORDS_SHEET_NAME = "Acordes"
 const PRINT_SHEET_NAME = "Impresión"
+const CONTROL_PANEL_SHEET_NAME = "Panel de Control"
 
 const LYRICS_RIGHT_TRAY_RANGE_NAME = "Ideas_Sueltas"
 const CHORDS_HEADER_RANGE_NAME = "Encabezado_Acordes"
 const KEY_RANGE_NAME = "Tonalidad"
 const AUTOTRANSPOSE_RANGE_NAME = "Auto_Trasponer"
+const TEMPO_RANGE_NAME = "Tempo"
+const NOTES_RANGE_NAME = "Notas"
+const AUTHOR_RANGE_NAME = "Autor"
+const CONTENT_MARGIN_H_RANGE_NAME = "Margen_H"
+const CONTENT_MARGIN_V_RANGE_NAME = "Margen_V"
+const HORIZONTAL_PADDING_RANGE_NAME = "Separación_H"
+const VERTICAL_PADDING_RANGE_NAME = "Separación_V"
 
+const DEFAULT_CONTENT_MARGIN_H = 1
+const DEFAULT_CONTENT_MARGIN_V = 1
+const DEFAULT_HORIZONTAL_PADDING = 2
+const DEFAULT_VERTICAL_PADDING = 2
+
+export const PRINT_PAGE_WIDTH = 46
+export const PRINT_PAGE_HEIGHT = 51
+export const PRINT_HEADER_HEIGHT = 4
+export const PRINT_FOOTER_HEIGHT = 1
+const PRINT_HEADER_MARGIN = 1
+
+
+export interface FormatOptions {
+  fontFamily?: string
+  fontSize?: number
+  fontWeight?: "bold" | "normal"
+  verticalAlignment?: "top" | "middle" | "bottom"
+  horizontalAlignment?: "left" | "center" | "right"
+  wrapStrategy?: GoogleAppsScript.Spreadsheet.WrapStrategy
+  border?: boolean
+}
 
 export abstract class Space {
   abstract area: Area
   abstract sheet: Sheet
 
-  @lazy get range(): Range | undefined {
+  @lazy protected get range(): Range | undefined {
     return this.area.isEmpty ? undefined : this.sheet.getRange(this.y + 1, this.x + 1, this.height, this.width)
   }
-  @lazy get x(): number { return this.area.x }
-  @lazy get y(): number { return this.area.y }
-  @lazy get width(): number { return this.area.width }
-  @lazy get height(): number { return this.area.height }
-  @lazy get start(): Point { return this.area.start }
-  @lazy get end(): Point { return this.area.end }
-  @lazy get isEmpty(): boolean { return this.area.isEmpty }
 
-  getValues(): CellValue[][] { return this.range?.getValues() ?? [] }
-  setValues(newValues: CellValue[][]): void { this.range?.setValues(newValues) }
+  get x(): number { return this.area.x }
+  get y(): number { return this.area.y }
+  get width(): number { return this.area.width }
+  get height(): number { return this.area.height }
+  get start(): Point { return this.area.start }
+  get end(): Point { return this.area.end }
+  get isEmpty(): boolean { return this.area.isEmpty }
+
+  getValues(): CellValue[][] { return this.range?.getValues() ?? raise(new Error("Cannot get values from empty space")) }
+  setValues(newValues: CellValue[][]): void { this.range?.setValues(newValues) ?? raise(new Error("Cannot set values on empty space")) }
+
+  getRichTextValues(): (RichTextValue | null)[][] { return this.range?.getRichTextValues() ?? raise(new Error("Cannot get rich text values from empty space")) }
+  setRichTextValues(values: RichTextValue[][]): void { this.range?.setRichTextValues(values) ?? raise(new Error("Cannot set rich text values on empty space")) }
+
+  format(options: FormatOptions): this {
+    let range = this.range
+    if (!range) return this
+    if (options.fontFamily !== undefined) range = range.setFontFamily(options.fontFamily)
+    if (options.fontSize !== undefined) range = range.setFontSize(options.fontSize)
+    if (options.fontWeight !== undefined) range = range.setFontWeight(options.fontWeight)
+    if (options.verticalAlignment !== undefined) range = range.setVerticalAlignment(options.verticalAlignment)
+    if (options.horizontalAlignment !== undefined) range = range.setHorizontalAlignment(options.horizontalAlignment)
+    if (options.wrapStrategy !== undefined) range = range.setWrapStrategy(options.wrapStrategy)
+    if (options.border) range.setBorder(true, true, true, true, false, false)
+    return this
+  }
 
   sub(f: (area: Area) => Area): SubSpace { return new SubSpace(this, f(this.area)) }
-  cell<T extends CellValue>(adapter: (value: CellValue) => T) {
-    return (f: (area: Area) => Area) => { return new CellSpace(this, adapter, f(this.area)) }
+  cell<T extends CellValue>(adapter: (value: CellValue) => T, defaultValue?: T) {
+    return (f: (area: Area) => Area) => new CellSpace(this, adapter, f(this.area), defaultValue)
   }
 }
 
@@ -81,28 +128,48 @@ export class SubSpace extends Space {
 
 
 export class CellSpace<T extends CellValue> extends Space {
+  private merged = false
+
   constructor(
     readonly parent: Space,
     readonly adapter: (value: CellValue) => T,
     readonly area: Area,
+    readonly defaultValue?: T,
   ) {
     super()
-    if (area.width !== 1 || area.height !== 1) {
-      throw new Error(`CellSpace must be 1x1, got ${area}`)
-    }
+    if (area.isEmpty) raise(new Error("Cannot create CellSpace with empty area"))
   }
 
   @lazy get sheet(): Sheet { return this.parent.sheet }
 
-  getValue(): T { return this.adapter(this.range?.getValue() ?? null) }
-  setValue(value: T): void { this.range?.setValue(value) }
+  private ensureMerged(): void {
+    if (!this.merged && (this.area.width > 1 || this.area.height > 1)) {
+      this.range?.merge()
+      this.merged = true
+    }
+  }
+
+  getValue(): T {
+    this.ensureMerged()
+    const value = this.adapter(this.range!.getValue())
+    if (!value && this.defaultValue !== undefined) return this.defaultValue
+    return value
+  }
+
+  setValue(value: T): void {
+    this.ensureMerged()
+    this.range!.setValue(value)
+  }
+
+  getRichTextValue(): RichTextValue | null { return this.range!.getRichTextValue() }
+  setRichTextValue(value: RichTextValue): void { this.range!.setRichTextValue(value) }
 }
 
 
 
 export class $ {
   @lazy static get SPREADSHEET() { return SpreadsheetApp.getActive() }
-  @lazy static get ALL(): SheetSpace[] { return Object.values($).filter((v): v is SheetSpace => v instanceof SheetSpace) }
+  static get ALL(): SheetSpace[] { return [$.Lyrics, $.Chords, $.Print, $.ControlPanel] }
 
   static get(name: string): SheetSpace {
     return $.ALL.find(space => space.name === name) ?? raise(new Error(`Unknown sheet: "${name}"`))
@@ -110,7 +177,8 @@ export class $ {
 
   @lazy static get Lyrics() { return new LyricsSheet() }
   @lazy static get Chords() { return new ChordsSheet() }
-  @lazy static get Print() { return new SheetSpace(PRINT_SHEET_NAME) }
+  @lazy static get Print() { return new PrintSheet() }
+  @lazy static get ControlPanel() { return new ControlPanelSheet() }
 }
 
 class LyricsSheet extends SheetSpace {
@@ -130,4 +198,40 @@ class ChordsSheet extends SheetSpace {
   @lazy get header(): SubSpace { return this.sub(() => this.getNamedArea(CHORDS_HEADER_RANGE_NAME)) }
   @lazy get key(): CellSpace<string> { return this.header.cell(String)(() => this.getNamedArea(KEY_RANGE_NAME)) }
   @lazy get autotranspose(): CellSpace<boolean> { return this.header.cell(Boolean)(() => this.getNamedArea(AUTOTRANSPOSE_RANGE_NAME)) }
+  @lazy get tempo(): CellSpace<number> { return this.header.cell(Number)(() => this.getNamedArea(TEMPO_RANGE_NAME)) }
+  @lazy get notes(): CellSpace<string> { return this.header.cell(String)(() => this.getNamedArea(NOTES_RANGE_NAME)) }
+}
+
+export class PrintSheet extends SheetSpace {
+  constructor() { super(PRINT_SHEET_NAME) }
+
+  private readonly headerWidth = PRINT_PAGE_WIDTH - 2 * PRINT_HEADER_MARGIN
+
+  page(index: number): SubSpace {
+    return this.sub(() => new Area(index * PRINT_PAGE_WIDTH, 0, PRINT_PAGE_WIDTH, PRINT_PAGE_HEIGHT))
+  }
+
+  pageContent(index: number): SubSpace {
+    return this.sub(() => new Area(index * PRINT_PAGE_WIDTH, 0, PRINT_PAGE_WIDTH, PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT))
+  }
+
+  pageFooter(index: number): CellSpace<string> {
+    return this.cell(String)(() => new Area(index * PRINT_PAGE_WIDTH, PRINT_PAGE_HEIGHT - PRINT_FOOTER_HEIGHT, PRINT_PAGE_WIDTH, PRINT_FOOTER_HEIGHT))
+  }
+
+  @lazy get header(): SubSpace { return this.sub(() => Origin.to({ x: PRINT_PAGE_WIDTH, y: PRINT_HEADER_HEIGHT })) }
+  @lazy get title(): CellSpace<string> { return this.cell(String)(() => new Area(PRINT_HEADER_MARGIN, 0, this.headerWidth, 2)) }
+  @lazy get author(): CellSpace<string> { return this.cell(String)(() => new Area(PRINT_HEADER_MARGIN, 2, Math.floor(this.headerWidth / 2), 1)) }
+  @lazy get timestamp(): CellSpace<string> { return this.cell(String)(() => new Area(PRINT_HEADER_MARGIN + Math.floor(this.headerWidth / 2), 2, Math.ceil(this.headerWidth / 2), 1)) }
+  @lazy get info(): CellSpace<string> { return this.cell(String)(() => new Area(PRINT_HEADER_MARGIN, 3, this.headerWidth, 1)) }
+}
+
+class ControlPanelSheet extends SheetSpace {
+  constructor() { super(CONTROL_PANEL_SHEET_NAME) }
+
+  @lazy get author(): CellSpace<string> { return this.cell(String)(() => this.getNamedArea(AUTHOR_RANGE_NAME)) }
+  @lazy get contentMarginH(): CellSpace<number> { return this.cell(Number, DEFAULT_CONTENT_MARGIN_H)(() => this.getNamedArea(CONTENT_MARGIN_H_RANGE_NAME)) }
+  @lazy get contentMarginV(): CellSpace<number> { return this.cell(Number, DEFAULT_CONTENT_MARGIN_V)(() => this.getNamedArea(CONTENT_MARGIN_V_RANGE_NAME)) }
+  @lazy get horizontalPadding(): CellSpace<number> { return this.cell(Number, DEFAULT_HORIZONTAL_PADDING)(() => this.getNamedArea(HORIZONTAL_PADDING_RANGE_NAME)) }
+  @lazy get verticalPadding(): CellSpace<number> { return this.cell(Number, DEFAULT_VERTICAL_PADDING)(() => this.getNamedArea(VERTICAL_PADDING_RANGE_NAME)) }
 }

@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
+import { Area, Point } from "../src/Area"
+import type { LayoutConfig } from "../src/MusicSheet"
 
 const mockSheetProto = {}
 const mockRangeProto = {}
@@ -11,15 +13,52 @@ vi.stubGlobal("SpreadsheetApp", {
   getActive: () => ({ getSheetByName: () => mockSheet })
 })
 
-const { splitIntoSectionColumns, splitIntoSections, calculateSectionWidth, calculateLayout } = await import("../src/MusicSheet")
+const { splitIntoSectionColumns, splitIntoSections, calculateSectionWidth, calculatePositions } = await import("../src/MusicSheet")
 
-type Range = GoogleAppsScript.Spreadsheet.Range
+function mockSection(width: number, height: number): Area {
+  return new Area(0, 0, width, height)
+}
 
-function mockSection(width: number, height: number): Range {
+function testConfig(
+  availableWidth: number,
+  availableHeight: number,
+  firstPageHeaderHeight: number,
+  horizontalPadding = 0,
+  verticalPadding = 0
+): LayoutConfig {
   return {
-    getNumColumns: () => width,
-    getNumRows: () => height
-  } as Range
+    fullPageWidth: availableWidth,
+    availableWidthPerPage: availableWidth,
+    availableHeightPerPage: availableHeight,
+    firstPageHeaderHeight,
+    horizontalContentMargin: 0,
+    verticalContentMargin: 0,
+    horizontalPadding,
+    verticalPadding,
+  }
+}
+
+function deriveStructure(sections: Area[], positions: Point[], pageWidth: number): Area[][][] {
+  const pages = new Map<number, Map<number, Area[]>>()
+
+  sections.forEach((section, i) => {
+    const pos = positions[i]
+    const pageIndex = Math.floor(pos.x / pageWidth)
+    const columnX = pos.x
+
+    if (!pages.has(pageIndex)) pages.set(pageIndex, new Map())
+    const page = pages.get(pageIndex)!
+    if (!page.has(columnX)) page.set(columnX, [])
+    page.get(columnX)!.push(section)
+  })
+
+  return Array.from(pages.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([, page]) =>
+      Array.from(page.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([, sections]) => sections)
+    )
 }
 
 describe("splitIntoSectionColumns", () => {
@@ -287,14 +326,16 @@ describe("calculateSectionWidth", () => {
   })
 })
 
-describe("calculateLayout", () => {
+describe("calculatePositions", () => {
   it("should return empty array for no sections", () => {
-    expect(calculateLayout([], 45, 50, 5)).toEqual([])
+    expect(calculatePositions([], testConfig(45, 50, 5))).toEqual([])
   })
 
   it("should place single section on first page", () => {
     const section = mockSection(10, 20)
-    const result = calculateLayout([section], 45, 50, 5)
+    const sections = [section]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(1)
     expect(result[0]).toHaveLength(1)
     expect(result[0][0]).toEqual([section])
@@ -303,7 +344,9 @@ describe("calculateLayout", () => {
   it("should stack sections vertically in same column", () => {
     const s1 = mockSection(10, 10)
     const s2 = mockSection(10, 10)
-    const result = calculateLayout([s1, s2], 45, 50, 5)
+    const sections = [s1, s2]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(1)
     expect(result[0]).toHaveLength(1)
     expect(result[0][0]).toEqual([s1, s2])
@@ -312,7 +355,9 @@ describe("calculateLayout", () => {
   it("should start new column when height exceeded", () => {
     const s1 = mockSection(10, 30)
     const s2 = mockSection(10, 20)
-    const result = calculateLayout([s1, s2], 45, 50, 5)
+    const sections = [s1, s2]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(1)
     expect(result[0]).toHaveLength(2)
     expect(result[0][0]).toEqual([s1])
@@ -322,7 +367,9 @@ describe("calculateLayout", () => {
   it("should start new page when width exceeded", () => {
     const s1 = mockSection(25, 30)
     const s2 = mockSection(25, 30)
-    const result = calculateLayout([s1, s2], 45, 50, 5)
+    const sections = [s1, s2]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(2)
     expect(result[0][0]).toEqual([s1])
     expect(result[1][0]).toEqual([s2])
@@ -331,7 +378,9 @@ describe("calculateLayout", () => {
   it("should respect first page header height", () => {
     const s1 = mockSection(10, 44)
     const s2 = mockSection(10, 2)
-    const result = calculateLayout([s1, s2], 45, 50, 5)
+    const sections = [s1, s2]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(1)
     expect(result[0]).toHaveLength(2)
   })
@@ -339,33 +388,31 @@ describe("calculateLayout", () => {
   it("should place sections on second page when first is full", () => {
     const s1 = mockSection(45, 45)
     const s2 = mockSection(10, 45)
-    const result = calculateLayout([s1, s2], 45, 50, 5)
+    const sections = [s1, s2]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(2)
     expect(result[1][0]).toEqual([s2])
   })
 
   it("should have more space on second page (no header)", () => {
-    // First page: 50 - 5 = 45 rows available
-    // Second page: 50 rows available (no header)
-    // s1 takes full first page width, height 45 (fits exactly on first page)
-    // s2 is 48 rows - too tall for first page (45) but fits on second page (50)
     const s1 = mockSection(45, 45)
     const s2 = mockSection(10, 48)
-    const result = calculateLayout([s1, s2], 45, 50, 5)
+    const sections = [s1, s2]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(2)
     expect(result[0][0]).toEqual([s1])
     expect(result[1][0]).toEqual([s2])
   })
 
   it("should stack more sections on second page due to extra height", () => {
-    // First page: 45 rows available (50 - 5 header)
-    // Second page: 50 rows available
-    // s1 (45 rows) fills first page
-    // s2 + s3 (24 + 24 = 48 rows) should fit on second page but not on first
     const s1 = mockSection(45, 45)
     const s2 = mockSection(10, 24)
     const s3 = mockSection(10, 24)
-    const result = calculateLayout([s1, s2, s3], 45, 50, 5)
+    const sections = [s1, s2, s3]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(2)
     expect(result[0][0]).toEqual([s1])
     expect(result[1][0]).toEqual([s2, s3])
@@ -375,7 +422,9 @@ describe("calculateLayout", () => {
     const s1 = mockSection(15, 30)
     const s2 = mockSection(15, 30)
     const s3 = mockSection(15, 30)
-    const result = calculateLayout([s1, s2, s3], 45, 50, 5)
+    const sections = [s1, s2, s3]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(1)
     expect(result[0]).toHaveLength(3)
   })
@@ -385,7 +434,9 @@ describe("calculateLayout", () => {
     const s2 = mockSection(20, 25)
     const s3 = mockSection(20, 20)
     const s4 = mockSection(20, 20)
-    const result = calculateLayout([s1, s2, s3, s4], 45, 50, 5)
+    const sections = [s1, s2, s3, s4]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(2)
     expect(result[0]).toHaveLength(2)
     expect(result[0][0]).toEqual([s1])
@@ -396,7 +447,9 @@ describe("calculateLayout", () => {
   it("should account for horizontal padding between columns", () => {
     const s1 = mockSection(20, 30)
     const s2 = mockSection(20, 30)
-    const result = calculateLayout([s1, s2], 45, 50, 5, 6, 0)
+    const sections = [s1, s2]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5, 6, 0))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(2)
     expect(result[0][0]).toEqual([s1])
     expect(result[1][0]).toEqual([s2])
@@ -405,7 +458,9 @@ describe("calculateLayout", () => {
   it("should account for vertical padding between sections", () => {
     const s1 = mockSection(10, 22)
     const s2 = mockSection(10, 22)
-    const result = calculateLayout([s1, s2], 45, 50, 5, 0, 5)
+    const sections = [s1, s2]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5, 0, 5))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(1)
     expect(result[0]).toHaveLength(2)
     expect(result[0][0]).toEqual([s1])
@@ -415,53 +470,50 @@ describe("calculateLayout", () => {
   it("should fit sections without padding when padding is zero", () => {
     const s1 = mockSection(20, 30)
     const s2 = mockSection(20, 30)
-    const result = calculateLayout([s1, s2], 45, 50, 5, 0, 0)
+    const sections = [s1, s2]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5, 0, 0))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(1)
     expect(result[0]).toHaveLength(2)
   })
 
   it("should not add padding before first column or first section", () => {
     const s1 = mockSection(43, 43)
-    const result = calculateLayout([s1], 45, 50, 5, 2, 2)
+    const sections = [s1]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5, 2, 2))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(1)
     expect(result[0]).toHaveLength(1)
     expect(result[0][0]).toEqual([s1])
   })
 
   it("should account for column width growth when checking if new column fits", () => {
-    // Column 1: s1 (10w, 40h) then s2 (15w, 4h) stacks → column width grows to 15
-    // Column 2: s3 (15w, 44h) alone (no room for s4)
-    // Column 3: s4 (15w) → should NOT fit because 15 + 2 + 15 + 2 + 15 = 49 > 45
-    // Bug: currentRowWidth only tracks completed columns, but check didn't include currentColumnWidth
     const s1 = mockSection(10, 40)
-    const s2 = mockSection(15, 4)   // stacks, grows column 1 to 15w, total height 44
-    const s3 = mockSection(15, 44)  // starts column 2 (can't stack: 44+4=48>45)
-    const s4 = mockSection(15, 44)  // should NOT fit as column 3 (15+2+15+2+15=49>45)
-    const result = calculateLayout([s1, s2, s3, s4], 45, 50, 5, 2, 0)
-    // Expected: 2 pages (s4 doesn't fit on page 1)
-    // Bug: 1 page with 3 columns (if currentColumnWidth not included in check)
+    const s2 = mockSection(15, 4)
+    const s3 = mockSection(15, 44)
+    const s4 = mockSection(15, 44)
+    const sections = [s1, s2, s3, s4]
+    const positions = calculatePositions(sections, testConfig(45, 50, 5, 2, 0))
+    const result = deriveStructure(sections, positions, 45)
     expect(result).toHaveLength(2)
-    expect(result[0]).toHaveLength(2)  // columns 1 and 2
+    expect(result[0]).toHaveLength(2)
     expect(result[0][0]).toEqual([s1, s2])
     expect(result[0][1]).toEqual([s3])
     expect(result[1][0]).toEqual([s4])
   })
 
-  it("should not allow stacking when it would cause column width to overflow page", () => {
-    // Page width: 46, already have columns totaling 31w (14 + 2 + 15)
-    // Column 3 starts with 13w section, then tries to stack 15w section
-    // 31 + 2 + 15 = 48 > 46, so the 15w section should NOT stack
-    const s1 = mockSection(14, 44)  // column 1
-    const s2 = mockSection(15, 30)  // column 2: doesn't stack (44+30 > 46)
-    const s3 = mockSection(13, 16)  // column 3: fits (14+2+15+2+13=46)
-    const s4 = mockSection(15, 8)   // would grow column 3 to 15w: 14+2+15+2+15=48 > 46
-    const result = calculateLayout([s1, s2, s3, s4], 46, 51, 5, 2, 2)
-    // s4 should NOT stack into column 3, should go to new page
+  it("should move entire column to next page when it doesn't fit width-wise", () => {
+    const s1 = mockSection(14, 44)
+    const s2 = mockSection(15, 30)
+    const s3 = mockSection(13, 16)
+    const s4 = mockSection(15, 8)
+    const sections = [s1, s2, s3, s4]
+    const positions = calculatePositions(sections, testConfig(46, 51, 5, 2, 2))
+    const result = deriveStructure(sections, positions, 46)
     expect(result).toHaveLength(2)
-    expect(result[0]).toHaveLength(3)
+    expect(result[0]).toHaveLength(2)
     expect(result[0][0]).toEqual([s1])
     expect(result[0][1]).toEqual([s2])
-    expect(result[0][2]).toEqual([s3])
-    expect(result[1][0]).toEqual([s4])
+    expect(result[1][0]).toEqual([s3, s4])
   })
 })

@@ -1,4 +1,4 @@
-import { count, modulo } from "./Utils"
+import { count, lazy, modulo } from "./Utils"
 
 
 const CHORD_REGEX = /^([A-G][#b]*)([^/#b]*)(?:\/([A-G][#b]*))?$/
@@ -87,7 +87,7 @@ export class Pitch {
   }
 
 
-  private get index(): number {
+  @lazy private get index(): number {
     return Pitch.INSTANCES.indexOf(this)
   }
 
